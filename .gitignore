@@ -1,0 +1,22 @@
+# 忽略 sbt 构建产物
+target/
+project/target/
+project/project/
+
+# 忽略 IDE 配置文件
+.bsp/
+.idea/
+.vscode/
+.bloop/
+
+# 忽略 Metals (VS Code 插件) 产物
+.metals/
+
+# 忽略生成的 Verilog 和波形文件
+test_run_dir/
+generated/
+*.sv
+*.v
+*.vcd
+*.fir
+*.anno.json
