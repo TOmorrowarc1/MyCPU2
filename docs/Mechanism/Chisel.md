@@ -292,7 +292,7 @@ myVec := VecInit(Seq.fill(8)(0.U(32.W)))
 }
 ```
 
-## 其他常用函数（语法糖）
+## 其他常用函数
 
 ### 1. 选择器生成语句
 
@@ -412,6 +412,70 @@ val freeIdx = PriorityEncoder(rs.map(!_.busy))
 ```scala
 // 指令译码
 val is_addi = io.inst === BitPat("b?????????????????000?????0010011")
+```
+
+### 3. 流水线接口与握手协议: `Decoupled()`
+
+#### 3.1 函数定义与类型约束
+`Decoupled` 是 Chisel 标准库（`chisel3.util`）中定义的一个硬件接口包装类。
+
+*   **输入参数**：它接受一个类型为 `T <: Data` 的参数，即 **Bundle**、**UInt**、**SInt**等所有 Chisel 硬件 prototype。
+    *   *Scala 实例限制*：它不能接受纯 Scala 实例（如 `Int`, `List`），因为这些类型在编译时无法转化为电学导线。
+*   **返回类型**：返回一个继承自 `Bundle` 的 `DecoupledIO[T]` 实例，该实例在逻辑上扩展原始数据，增加以下成员：
+    *   **`bits`**: 原始的硬件数据类型 $T$（Output）。
+    *   **`valid`**: 高电平有效，表示当前 `bits` 上的数据是真实的、有效的（Output）。
+    *   **`ready`**: 高电平有效，表示下游电路能够在此周期接收数据（Input）。
+*   **内建方法 `fire`**：该 Bundle 包含一个名为 `fire` 的方法，其逻辑等价于 `valid && ready`。它表示**握手成功**，是状态迁移的触发点。
+
+#### 3.2 用途、语义与工程约束
+`Decoupled` 是实现**弹性流水线（Elastic Pipeline）**和**反压机制（Backpressure）**的核心抽象。
+
+*   **级间握手语义**：
+    *   **`valid`**：由生产者驱动，代表上游数据已就位。
+    *   **`ready`**：由消费者驱动，代表下游可消耗数据。
+    *   **`fire`**：代表该周期内，数据已成功从上游流向下游，**数据被消耗**。
+*   **寄存器更新法则**：
+    通常将 `fire` 作为上游寄存器的写使能信号。若 `ready` 为低，则 `fire` 为低，上游寄存器停止更新，从而实现**反压**，确保数据在被下游确认接收前不被覆盖。
+*   **组合逻辑约束（避免死锁与环路）**：
+    *   `ready` 可以依赖于 `valid`，但 **`valid` 绝对不准依赖 `ready`**，以防止形成**组合逻辑环**，导致电路在物理上无法收敛或产生振荡。
+*   **接口翻转 (`Flipped`)**：
+    `Decoupled` 默认定义的是生产者的方向（Output: bits/valid, Input: ready）。在模块的输入端，必须使用 `Flipped(Decoupled(...))` 将其转换为消费者方向。
+*   **时序开销（关键路径）**：
+    `valid` 信号往往经过复杂的流水线内计算（e.g. 多路仲裁、状态判断），若将多个模块的 `valid` 逻辑串联，会形成极长的组合逻辑链，严重降低主频。
+
+#### 3.3 示例：Tomasulo 架构中的 Dispatch 单元
+
+```scala
+class DispatchToRS extends Module {
+  val io = IO(new Bundle {
+    // 生产者接口：来自重命名单元
+    val in = Flipped(Decoupled(new MicroOp))
+    // 消费者接口：发往执行单元的保留站
+    val out = Decoupled(new MicroOp)
+  })
+
+  // 定义内部寄存器，作为级间 Buffer
+  val opReg = Reg(new MicroOp)
+  val full  = RegInit(false.B)
+
+  // --- Ready 信号逻辑 (下游驱动上游) ---
+  io.in.ready := !full || io.out.ready
+
+  // --- Fire 信号的应用 (数据的消耗与捕获) ---
+  // 1. 捕获上游数据
+  when (io.in.fire) {
+    opReg := io.in.bits
+    full  := true.B
+  }
+  // 2. 消耗当前数据
+  .elsewhen (io.out.fire) {
+    full  := false.B
+  }
+
+  // --- Valid 信号逻辑 (正向驱动) ---
+  io.out.valid := full
+  io.out.bits  := opReg
+}
 ```
 
 ## 验证与调试: ChiselTest
