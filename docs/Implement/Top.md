@@ -33,13 +33,13 @@
     *   向 Fetcher 发送 `IFStall` 信号。
 
 ### 1.3 RAT (Register Alias Table)
-*   **职责**：维护如下**架构寄存器->物理寄存器**映射 -- Frontend RAT (推断状态), Retirement RAT (提交状态), 最多 4 个 SnapShots ；维护 Free List (物理寄存器池，使用位矢量表示 busy 部分) 以及 Retirement Free List(ROB 提交的正被占据的物理寄存器对应 busy 位矢量)；重命名之后将对应数据（操作数对应立即数或寄存器，valid 位）送入 RS。
+*   **职责**：维护如下**架构寄存器->物理寄存器**映射 -- Frontend RAT (推断状态), Retirement RAT (提交状态), 最多 4 个 SnapShots ；维护 Free List (物理寄存器池，使用位矢量表示 busy 部分) 以及 Retirement Free List (ROB 提交的正被占据的物理寄存器对应 busy 位矢量)，4 个 Snapshots 中各有一份 Free List；重命名之后将对应数据（操作数对应立即数或寄存器，valid 位）送入 RS。
 *   **输入**：来自 Decoder 的 `{Data, IsBranch}` 请求；来自 ROB 的 `{CommitPreRd, CommitPhyRd, GlobalFlush}`；来自 BRU 的 `{BranchFlush, SnapshotID, BranchMask}`。
 *   **逻辑简述**：
     *   **重命名**：接受 Decoder 请求时执行：
         *   **分配新物理寄存器**：如果 rd != x0，则从 Free List 分配`PhyRd` 并将该寄存器状态置为 busy。
         *   **更新 Frontend RAT**：将架构寄存器 rd 映射更新为 `PhyRd`。
-    *   **分支快照**：若 `IsBranch === true.B`，保存当前 Frontend RAT 到 SnapShots 中。4 份 Snapshots 对应 4 位位矢量 `BranchMask`，以当次使用快照对应独热码为 `SnapshotID`。
+    *   **分支快照**：若 `IsBranch === true.B`，保存当前 Frontend RAT 与 Free List 到 Snapshots 中。4 份 Snapshots 对应 4 位位矢量 `BranchMask`，以当次使用快照对应独热码为 `SnapshotID`。
     *   **恢复与冲刷**：
         *   **Global Flush**：直接将 Frontend RAT 覆盖为 Retirement RAT，回收所有 Snapshots。
         *   **Branch Mispredict**：通过 `SnapshotID` 瞬间恢复 Frontend RAT，同时根据 `branch_mask` 回收不再需要的 Snapshots。
@@ -66,6 +66,9 @@
     *   **监听**：在对应 RS 中存储指令控制信息，数据合法与否。时刻比对 CDB 上的 `ResultReg`。若匹配则将对应数据置为 valid。
     *   **发射**：RS 使用 FIFO，当一条指令的所有操作数都 valid ，即该指令valid 且对应 EU ready 时将最早的指令需要的源寄存器值从 PRF 中取出，发送到 EU 中求取结果。
     *   **冲刷**：如果 ROB 将 `GlobalFlush` 信号拉高，则立刻通过 busy 位置 0 方式冲刷所有指令。如果 BRU 拉高 `BranchFlush` 则根据 `BranchMask` 进行位运算，找出依赖于对应分支指令并清理。
+*   **输出**：
+    *   向 PRF 发送 `{SourceReg1, SourceReg2}`。
+    *   向 EU 发送 `{Opcode, Data, RobID, Prediction}`。   
 
 ### 2.2 ALU
 *   **职责**：处理普通计算。
@@ -92,7 +95,7 @@
 ### 3.1 PRF (Physical Register File)
 *   **职责**：储存数据的物理寄存器。
 *   **写端口**：连接 **CDB**，监听 `ResultRd` 与 `Data` ，若不为 x0 则写入数据。
-*   **读端口**：连接 **RS 的发射端**，在 Issue 阶段接受源寄存器编号，读取出对应值并返回。
+*   **读端口**：连接 **RS 的发射端**，在 Issue 阶段接受源寄存器编号，读取出对应值并直接将对应值输入 EU 进行计算。
 
 ### 3.2 ROB (Reorder Buffer)
 *   **职责**：按 PO 维护指令状态：完成情况、异常情况、分支依赖、目标架构寄存器、目标物理寄存器、原映射指向物理寄存器、用于快捷冲刷的分支掩码。同时维护全局的纪元信号，处理异常、提交。为部分特殊指令提供服务：CSR 访问指令在此执行，Store 指令需要访存许可，MRET 等特权指令在此与 CSRsUnit 交互。
