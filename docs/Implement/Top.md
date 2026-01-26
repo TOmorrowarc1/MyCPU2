@@ -17,7 +17,7 @@
         *   否则 `NextPC` 保持不变。   
 *   **输出**：向 Memory Access (ITLB) 发送 `{PC, PrivMode, InsEpoch, Prediction, Exception}`。
 
-**2. Decoder**
+### 1.2 Decoder
 *   **职责**：将指令解析到微指令；进行寄存器重命名请求与快照请求；异常检测。
 *   **输入**：来自 Icache 的 `{Instruction, PC, PrivMode, InsEpoch, Prediction, Exception}`；来自 ROB 的 `FreeRobID`， `GlobalFlush` `CSRDone` 与来自 BRU 的 `BranchFlush`。
 *   **逻辑简述**：
@@ -32,7 +32,7 @@
     *   向 RS 发送 `{MinOps, Exceptions, RobID, Prediction}`。
     *   向 Fetcher 发送 `IFStall` 信号。
 
-**3. RAT (Register Alias Table)**
+### 1.3 RAT (Register Alias Table)
 *   **职责**：维护如下**架构寄存器->物理寄存器**映射 -- Frontend RAT (推断状态), Retirement RAT (提交状态), 最多 4 个 SnapShots ；维护 Free List (物理寄存器池，使用位矢量表示 busy 部分) 以及 Retirement Free List(ROB 提交的正被占据的物理寄存器对应 busy 位矢量)；重命名之后将对应数据（操作数对应立即数或寄存器，valid 位）送入 RS。
 *   **输入**：来自 Decoder 的 `{Data, IsBranch}` 请求；来自 ROB 的 `{CommitPreRd, CommitPhyRd, GlobalFlush}`；来自 BRU 的 `{BranchFlush, SnapshotID, BranchMask}`。
 *   **逻辑简述**：
@@ -44,14 +44,14 @@
         *   **Global Flush**：直接将 Frontend RAT 覆盖为 Retirement RAT，回收所有 Snapshots。
         *   **Branch Mispredict**：通过 `SnapshotID` 瞬间恢复 Frontend RAT，同时根据 `branch_mask` 回收不再需要的 Snapshots。
     *   **正常回收**：将 ROB 提交阶段发回的 `PreRd` 回收进 Free List；将 BRU 传来的预测成功分支（SnapshotID 非 0，但 BranchFlush 为 0）对应的 Snapshot 回收。
-    > 以上内容中回收的含义为将 busy 位置 0，表示该物理资源可再分配使用。
+        > 以上内容中回收的含义为将 busy 位置 0，表示该物理资源可再分配使用。
 *   **输出**：
     *   向 ROB 发送 `{LogicRd, PhyRd, PreRd, BranchMask}`。
     *   向 RS 发送 `{Data, BranchMask}`。
 
-## II. Backend
+## 2. Backend
 
-**4. RS (Reservation Stations)**
+### 2.1 RS (Reservation Stations)
 *   **组成**：分布式分布，由 ALURS 与 BRURS 组成。
 *   **职责**：接收 Decoder 送入的控制方面信息与来自 RAT 的数据相关信息，dispatch 到各个执行单元。维护因数据冒险与结构冒险暂时无法执行的指令队列，其中ALU 与 BRU 在对应 RS 中维护而 LSU 自主维护，RS 模块只负责分派。
 *   **输入**：
@@ -67,13 +67,16 @@
     *   **发射**：RS 使用 FIFO，当一条指令的所有操作数都 valid ，即该指令valid 且对应 EU ready 时将最早的指令需要的源寄存器值从 PRF 中取出，发送到 EU 中求取结果。
     *   **冲刷**：如果 ROB 将 `GlobalFlush` 信号拉高，则立刻通过 busy 位置 0 方式冲刷所有指令。如果 BRU 拉高 `BranchFlush` 则根据 `BranchMask` 进行位运算，找出依赖于对应分支指令并清理。
 
-**5. ALU**：处理普通计算。
+### 2.2 ALU
+*   **职责**：处理普通计算。
 
-**6. BRU**：计算跳转结果并与 `Prediction` 比较。若与预测不符，**立即**拉高 `BranchFlush`，命 `InsEpoch` 进行状态迁移。
+### 2.3 BRU
+*   **职责**：计算跳转结果并与 `Prediction` 比较。若与预测不符，**立即**拉高 `BranchFlush`，命 `InsEpoch` 进行状态迁移。
 
-**7. LSU (Load Store Unit)**：先写成最基本的 FIFO，之后慢慢处理。
+### 2.4 LSU (Load Store Unit)
+*   **职责**：先写成最基本的 FIFO，之后慢慢处理。
 
-**8. CBD (Common Bus Data)**
+### 2.5 CBD (Common Bus Data)
 *   **职责**：多对一仲裁（ALU/BRU/LSU $\rightarrow$ 总线），将通过仲裁的指令结果广播到 RS、PRF 与 ROB。
 *   **输入**：
     *   来自 ALU、BRU、LSU 的 `{ResultRd, data, RobID, Exception}`。
@@ -84,14 +87,14 @@
     *   **冲刷**：若 ROB拉高 `GlobalFlush` 或 BRU 拉高 `BranchFlush`，则当前周期的总线不进行广播。
 *   **输出**：`{ResultRd, data, RobID, Exception}`。
   
-### 3. 状态及其维护
+## 3. 状态及其维护
 
-**9. PRF (Physical Register File)**
+### 3.1 PRF (Physical Register File)
 *   **职责**：储存数据的物理寄存器。
 *   **写端口**：连接 **CDB**，监听 `ResultRd` 与 `Data` ，若不为 x0 则写入数据。
 *   **读端口**：连接 **RS 的发射端**，在 Issue 阶段接受源寄存器编号，读取出对应值并返回。
 
-**10. ROB (Reorder Buffer)**
+### 3.2 ROB (Reorder Buffer)
 *   **职责**：按 PO 维护指令状态：完成情况、异常情况、分支依赖、目标架构寄存器、目标物理寄存器、原映射指向物理寄存器、用于快捷冲刷的分支掩码。同时维护全局的纪元信号，处理异常、提交。为部分特殊指令提供服务：CSR 访问指令在此执行，Store 指令需要访存许可，MRET 等特权指令在此与 CSRsUnit 交互。
 *   **提交 (Commit)**：
     *   **普通指令**：更新 Retirement RAT，回收 `prd_old`。
@@ -99,12 +102,12 @@
     *   **Trap 处理**：若 Head 条目有 `exception_valid`，发出 `global_flush`，更新 `mcause/mepc`，重定向 PC 到 `mtvec`。
     *   **CSR/System 指令**：执行序列化更新。
 
-**11. CSRsUnit**
+### 3.3 CSRsUnit
 *   **职责**：维护 Control and Status Registers (CSRs)，处理 CSR 读写请求，处理特权指令（MRET 等），提供特权级别信息。
 
-### 4. 内存子系统 (Memory Access System)
+## 4. 内存子系统 (Memory Access System)
 
-**12. 三层逻辑架构**
+### 4.1 三层逻辑架构
 *   **Layer 1 (Translation)**：ITLB, DTLB。共享一个硬件 **Page Table Walker (PTW)**。
 *   **Layer 2 (Protection)**：**PMP & PMA 检查器**。对所有翻译后的 PA 进行物理法则校验。
 *   **Layer 3 (Controller)**：AXI4-Wide (512-bit) 接口。管理与物理 DRAM 的 Burst 交互。
