@@ -193,7 +193,7 @@ class RenameResPacket extends Bundle with CPUConfig {
   val PhyRs2      = PhyTag
   val Rs2Busy     = Bool()
   val PhyRd       = PhyTag // 目标寄存器 物理号
-  val SnapshotId  = UInt(SnapshotIdWidth.W) // 分配的快照 ID (分支专用)
+  val snapshotId  = SnapshotId // 分配的快照 ID (分支专用)
   val BranchMask  = SnapshotMask            // 当前依赖的分支掩码
 }
 
@@ -236,7 +236,7 @@ class BruRSEntry extends Bundle with CPUConfig {
   val data = new DataReq
   val robId     = RobTag
   val phyRd    = PhyTag
-  val snapshotId = UInt(SnapshotIdWidth.W)
+  val snapshotId = SnapshotId
   val snapshotmask = SnapshotMask
   val prediction = new Prediction
   val exception = new Exception
