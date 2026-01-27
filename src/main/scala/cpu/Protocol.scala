@@ -19,6 +19,7 @@ trait CPUConfig {
   val PhyRegIdWidth = 7    // 128 个物理寄存器
   val ArchRegIdWidth = 5   // 32 个架构寄存器
   val SnapshotIdWidth = 2  // 4 个 Snapshots
+  val EpochWidth = 2       // 4 个 Epochs
   
   def InstW = UInt(InstWidth.W)
   def AddrW = UInt(AddrWidth.W)
@@ -28,6 +29,7 @@ trait CPUConfig {
   def ArchTag = UInt(ArchRegIdWidth.W)
   def SnapshotId = UInt(SnapshotIdWidth.W)
   def SnapshotMask = UInt((1 << SnapshotIdWidth).W)
+  def EpochW = UInt(EpochWidth.W)
 }
 
 // 枚举类型助记符
@@ -129,7 +131,7 @@ class Prediction extends Bundle {
 // Fetcher -> Icache （反方向为 Icache -> Decoder）
 class IFetchPacket extends Bundle with CPUConfig {
   val pc          = AddrW
-  val inst        = InstW
+  val instEpoch   = EpochW
   val prediction  = new Prediction
   val exception   = new Exception       
   val privMode    = PrivMode()          
