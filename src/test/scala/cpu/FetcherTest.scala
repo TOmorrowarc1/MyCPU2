@@ -34,6 +34,50 @@ class FetcherTest extends AnyFlatSpec with ChiselScalatestTester {
     }
   }
   
+    it should "响应全局冲刷信号" in {
+    test(new Fetcher) { dut =>
+      // 初始化输入信号
+      dut.io.insEpoch.poke(0.U)
+      dut.io.branchFlush.poke(false.B)
+      dut.io.branchFlushPC.poke(0.U)
+      dut.io.ifStall.poke(false.B)
+      dut.io.privMode.poke(PrivMode.M)
+      
+      // 正常取指
+      dut.io.globalFlush.poke(false.B)
+      dut.io.icache.ready.poke(true.B)
+      dut.clock.step()
+      
+      // 发送全局冲刷信号，目标 PC 为 0x8000_2000
+      dut.io.globalFlush.poke(true.B)
+      dut.io.globalFlushPC.poke(0x80002000L.U)
+      
+      // PC 应该跳转到 0x8000_2000（优先级高于分支冲刷）
+      dut.io.icache.bits.pc.expect(0x80002000L.U)
+      dut.io.icache.bits.prediction.targetPC.expect(0x80002004L.U)
+      
+      // 握手成功
+      dut.clock.step()
+      
+      // nextPC 应该更新为 0x8000_2004
+      dut.io.globalFlush.poke(false.B)
+      dut.io.icache.bits.pc.expect(0x80002004L.U)
+
+      dut.clock.step()
+
+      dut.io.globalFlush.poke(true.B)
+      dut.io.globalFlushPC.poke(0x80003000L.U)
+      dut.io.branchFlush.poke(true.B)
+      dut.io.branchFlushPC.poke(0x80004000L.U)
+      dut.io.icache.bits.pc.expect(0x80003000L.U)
+
+      dut.clock.step()
+      dut.io.globalFlush.poke(false.B)
+      dut.io.branchFlush.poke(false.B)
+      dut.io.icache.bits.pc.expect(0x80003004L.U)
+    }
+  }
+
   it should "响应分支冲刷信号" in {
     test(new Fetcher) { dut =>
       // 初始化输入信号
@@ -65,37 +109,6 @@ class FetcherTest extends AnyFlatSpec with ChiselScalatestTester {
     }
   }
   
-  it should "响应全局冲刷信号" in {
-    test(new Fetcher) { dut =>
-      // 初始化输入信号
-      dut.io.insEpoch.poke(0.U)
-      dut.io.branchFlush.poke(false.B)
-      dut.io.branchFlushPC.poke(0.U)
-      dut.io.ifStall.poke(false.B)
-      dut.io.privMode.poke(PrivMode.M)
-      
-      // 正常取指
-      dut.io.globalFlush.poke(false.B)
-      dut.io.icache.ready.poke(true.B)
-      dut.clock.step()
-      
-      // 发送全局冲刷信号，目标 PC 为 0x8000_2000
-      dut.io.globalFlush.poke(true.B)
-      dut.io.globalFlushPC.poke(0x80002000L.U)
-      
-      // PC 应该跳转到 0x8000_2000（优先级高于分支冲刷）
-      dut.io.icache.bits.pc.expect(0x80002000L.U)
-      dut.io.icache.bits.prediction.targetPC.expect(0x80002004L.U)
-      
-      // 握手成功
-      dut.clock.step()
-      
-      // nextPC 应该更新为 0x8000_2004
-      dut.io.globalFlush.poke(false.B)
-      dut.io.icache.bits.pc.expect(0x80002004L.U)
-    }
-  }
-  
   it should "响应取指暂停信号" in {
     test(new Fetcher) { dut =>
       // 初始化输入信号
@@ -109,6 +122,8 @@ class FetcherTest extends AnyFlatSpec with ChiselScalatestTester {
       // 正常取指
       dut.io.ifStall.poke(false.B)
       dut.io.icache.ready.poke(true.B)
+      dut.io.icache.bits.pc.expect(0x80000000L.U)
+      
       dut.clock.step()
       
       // 发送取指暂停信号
@@ -148,6 +163,12 @@ class FetcherTest extends AnyFlatSpec with ChiselScalatestTester {
       
       // PC 应该跳转到 0x8000_3000
       dut.io.icache.bits.pc.expect(0x80003000L.U)
+
+      dut.clock.step()
+
+      dut.io.ifStall.poke(false.B)
+      dut.io.branchFlush.poke(false.B)
+      dut.io.icache.bits.pc.expect(0x80003004L.U)
     }
   }
   
