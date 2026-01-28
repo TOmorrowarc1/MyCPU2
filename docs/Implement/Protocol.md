@@ -104,6 +104,11 @@ object InterruptCause {
   val SEI = 9.U(4.W)
   val MEI = 11.U(4.W)
 }
+
+// 特殊指令标记
+object SpecialInstr extends ChiselEnum {
+  val BRANCH, STORE, FENCE, FENCEI, CSR, MRET, SRET, SFENCE, ECALL, EBREAK, WFI, NONE = Value
+}
 ```
 
 ### 1. 通用元数据
