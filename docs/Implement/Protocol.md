@@ -155,12 +155,7 @@ class ROBInitControlPacket extends Bundle with CPUConfig {
   val pc         = AddrW
   val prediction = new Prediction
   val exception  = new Exception
-  val isStore   = Bool()
-  val isCsr     = Bool()
-  val isMret    = Bool()
-  val isSret    = Bool()
-  val isSFENCE  = Bool()
-  val isFENCEI  = Bool()
+  val specialInstr = SpecialInstr()
 }
 
 // Decoder -> RS (分派信息)

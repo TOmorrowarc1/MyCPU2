@@ -35,104 +35,104 @@ Decoder 模块是 Tomasulo 架构中的关键组件，负责将指令流解析�
 
 **Opcode**: `0110011` (R-Type)
 
-| 指令 | BitPattern (31-0) | aluOp | op1Src | op2Src | lsuOp | lsuWidth | lsuSign | bruOp | immType | specialInstr |
-| :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- |
-| **ADD** | `0000000_rs2_rs1_000_rd_0110011` | ADD | REG | REG | NOP | WORD | UNSIGNED | NOP | R_TYPE | NONE |
-| **SUB** | `0100000_rs2_rs1_000_rd_0110011` | SUB | REG | REG | NOP | WORD | UNSIGNED | NOP | R_TYPE | NONE |
-| **SLL** | `0000000_rs2_rs1_001_rd_0110011` | SLL | REG | REG | NOP | WORD | UNSIGNED | NOP | R_TYPE | NONE |
-| **SLT** | `0000000_rs2_rs1_010_rd_0110011` | SLT | REG | REG | NOP | WORD | UNSIGNED | NOP | R_TYPE | NONE |
-| **SLTU**| `0000000_rs2_rs1_011_rd_0110011` | SLTU | REG | REG | NOP | WORD | UNSIGNED | NOP | R_TYPE | NONE |
-| **XOR** | `0000000_rs2_rs1_100_rd_0110011` | XOR | REG | REG | NOP | WORD | UNSIGNED | NOP | R_TYPE | NONE |
-| **SRL** | `0000000_rs2_rs1_101_rd_0110011` | SRL | REG | REG | NOP | WORD | UNSIGNED | NOP | R_TYPE | NONE |
-| **SRA** | `0100000_rs2_rs1_101_rd_0110011` | SRA | REG | REG | NOP | WORD | UNSIGNED | NOP | R_TYPE | NONE |
-| **OR** | `0000000_rs2_rs1_110_rd_0110011` | OR | REG | REG | NOP | WORD | UNSIGNED | NOP | R_TYPE | NONE |
-| **AND** | `0000000_rs2_rs1_111_rd_0110011` | AND | REG | REG | NOP | WORD | UNSIGNED | NOP | R_TYPE | NONE |
+| 指令 | BitPattern (31-0) | aluOp | op1Src | op2Src | lsuOp | lsuWidth | lsuSign | bruOp | immType | specialInstr | zicsrOp |
+| :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- |
+| **ADD** | `0000000_rs2_rs1_000_rd_0110011` | ADD | REG | REG | NOP | WORD | UNSIGNED | NOP | R_TYPE | NONE | NOP |
+| **SUB** | `0100000_rs2_rs1_000_rd_0110011` | SUB | REG | REG | NOP | WORD | UNSIGNED | NOP | R_TYPE | NONE | NOP |
+| **SLL** | `0000000_rs2_rs1_001_rd_0110011` | SLL | REG | REG | NOP | WORD | UNSIGNED | NOP | R_TYPE | NONE | NOP |
+| **SLT** | `0000000_rs2_rs1_010_rd_0110011` | SLT | REG | REG | NOP | WORD | UNSIGNED | NOP | R_TYPE | NONE | NOP |
+| **SLTU**| `0000000_rs2_rs1_011_rd_0110011` | SLTU | REG | REG | NOP | WORD | UNSIGNED | NOP | R_TYPE | NONE | NOP |
+| **XOR** | `0000000_rs2_rs1_100_rd_0110011` | XOR | REG | REG | NOP | WORD | UNSIGNED | NOP | R_TYPE | NONE | NOP |
+| **SRL** | `0000000_rs2_rs1_101_rd_0110011` | SRL | REG | REG | NOP | WORD | UNSIGNED | NOP | R_TYPE | NONE | NOP |
+| **SRA** | `0100000_rs2_rs1_101_rd_0110011` | SRA | REG | REG | NOP | WORD | UNSIGNED | NOP | R_TYPE | NONE | NOP |
+| **OR** | `0000000_rs2_rs1_110_rd_0110011` | OR | REG | REG | NOP | WORD | UNSIGNED | NOP | R_TYPE | NONE | NOP |
+| **AND** | `0000000_rs2_rs1_111_rd_0110011` | AND | REG | REG | NOP | WORD | UNSIGNED | NOP | R_TYPE | NONE | NOP |
 
 #### 1.2 算术与逻辑运算（寄存器-立即数）
 
 **Opcode**: `0010011` (I-Type)
 
-| 指令 | BitPattern | aluOp | op1Src | op2Src | lsuOp | lsuWidth | lsuSign | bruOp | immType | specialInstr |
-| :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- |
-| **ADDI** | `imm[11:0]_rs1_000_rd_0010011` | ADD | REG | IMM | NOP | WORD | UNSIGNED | NOP | I_TYPE | NONE |
-| **SLTI** | `imm[11:0]_rs1_010_rd_0010011` | SLT | REG | IMM | NOP | WORD | UNSIGNED | NOP | I_TYPE | NONE |
-| **SLTIU**| `imm[11:0]_rs1_011_rd_0010011` | SLTU | REG | IMM | NOP | WORD | UNSIGNED | NOP | I_TYPE | NONE |
-| **XORI** | `imm[11:0]_rs1_100_rd_0010011` | XOR | REG | IMM | NOP | WORD | UNSIGNED | NOP | I_TYPE | NONE |
-| **ORI** | `imm[11:0]_rs1_110_rd_0010011` | OR | REG | IMM | NOP | WORD | UNSIGNED | NOP | I_TYPE | NONE |
-| **ANDI** | `imm[11:0]_rs1_111_rd_0010011` | AND | REG | IMM | NOP | WORD | UNSIGNED | NOP | I_TYPE | NONE |
-| **SLLI** | `0000000_shamt_rs1_001_rd_0010011` | SLL | REG | IMM | NOP | WORD | UNSIGNED | NOP | I_TYPE | NONE |
-| **SRLI** | `0000000_shamt_rs1_101_rd_0010011` | SRL | REG | IMM | NOP | WORD | UNSIGNED | NOP | I_TYPE | NONE |
-| **SRAI** | `0100000_shamt_rs1_101_rd_0010011` | SRA | REG | IMM | NOP | WORD | UNSIGNED | NOP | I_TYPE | NONE |
+| 指令 | BitPattern | aluOp | op1Src | op2Src | lsuOp | lsuWidth | lsuSign | bruOp | immType | specialInstr | zicsrOp |
+| :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- |
+| **ADDI** | `imm[11:0]_rs1_000_rd_0010011` | ADD | REG | IMM | NOP | WORD | UNSIGNED | NOP | I_TYPE | NONE | NOP |
+| **SLTI** | `imm[11:0]_rs1_010_rd_0010011` | SLT | REG | IMM | NOP | WORD | UNSIGNED | NOP | I_TYPE | NONE | NOP |
+| **SLTIU**| `imm[11:0]_rs1_011_rd_0010011` | SLTU | REG | IMM | NOP | WORD | UNSIGNED | NOP | I_TYPE | NONE | NOP |
+| **XORI** | `imm[11:0]_rs1_100_rd_0010011` | XOR | REG | IMM | NOP | WORD | UNSIGNED | NOP | I_TYPE | NONE | NOP |
+| **ORI** | `imm[11:0]_rs1_110_rd_0010011` | OR | REG | IMM | NOP | WORD | UNSIGNED | NOP | I_TYPE | NONE | NOP |
+| **ANDI** | `imm[11:0]_rs1_111_rd_0010011` | AND | REG | IMM | NOP | WORD | UNSIGNED | NOP | I_TYPE | NONE | NOP |
+| **SLLI** | `0000000_shamt_rs1_001_rd_0010011` | SLL | REG | IMM | NOP | WORD | UNSIGNED | NOP | I_TYPE | NONE | NOP |
+| **SRLI** | `0000000_shamt_rs1_101_rd_0010011` | SRL | REG | IMM | NOP | WORD | UNSIGNED | NOP | I_TYPE | NONE | NOP |
+| **SRAI** | `0100000_shamt_rs1_101_rd_0010011` | SRA | REG | IMM | NOP | WORD | UNSIGNED | NOP | I_TYPE | NONE | NOP |
 
 #### 1.3 大立即数与 PC 相关指令
 
-| 指令 | BitPattern | aluOp | op1Src | op2Src | lsuOp | lsuWidth | lsuSign | bruOp | immType | specialInstr |
-| :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- |
-| **LUI** | `imm[31:12]_rd_0110111` | ADD | ZERO | IMM | NOP | WORD | UNSIGNED | NOP | U_TYPE | NONE |
-| **AUIPC**| `imm[31:12]_rd_0010111` | ADD | PC | IMM | NOP | WORD | UNSIGNED | NOP | U_TYPE | NONE |
+| 指令 | BitPattern | aluOp | op1Src | op2Src | lsuOp | lsuWidth | lsuSign | bruOp | immType | specialInstr | zicsrOp |
+| :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- |
+| **LUI** | `imm[31:12]_rd_0110111` | ADD | ZERO | IMM | NOP | WORD | UNSIGNED | NOP | U_TYPE | NONE | NOP |
+| **AUIPC**| `imm[31:12]_rd_0010111` | ADD | PC | IMM | NOP | WORD | UNSIGNED | NOP | U_TYPE | NONE | NOP |
 
 #### 1.4 控制流指令（分支与跳转）
 
 **Opcode**: `1100011` (B-Type), `1101111` (J-Type), `1100111` (I-Type)
 
-| 指令 | BitPattern | aluOp | op1Src | op2Src | lsuOp | lsuWidth | lsuSign | bruOp | immType | specialInstr |
-| :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- |
-| **JAL** | `imm[20\|10:1\|11\|19:12]_rd_1101111` | NOP | ZERO | FOUR | NOP | WORD | UNSIGNED | JAL | J_TYPE | BRANCH |
-| **JALR** | `imm[11:0]_rs1_000_rd_1100111` | NOP | ZERO | FOUR | NOP | WORD | UNSIGNED | JALR | I_TYPE | BRANCH |
-| **BEQ** | `imm..._rs2_rs1_000_..._1100011` | NOP | ZERO | FOUR | NOP | WORD | UNSIGNED | BEQ | B_TYPE | BRANCH |
-| **BNE** | `imm..._rs2_rs1_001_..._1100011` | NOP | ZERO | FOUR | NOP | WORD | UNSIGNED | BNE | B_TYPE | BRANCH |
-| **BLT** | `imm..._rs2_rs1_100_..._1100011` | NOP | ZERO | FOUR | NOP | WORD | UNSIGNED | BLT | B_TYPE | BRANCH |
-| **BGE** | `imm..._rs2_rs1_101_..._1100011` | NOP | ZERO | FOUR | NOP | WORD | UNSIGNED | BGE | B_TYPE | BRANCH |
-| **BLTU** | `imm..._rs2_rs1_110_..._1100011` | NOP | ZERO | FOUR | NOP | WORD | UNSIGNED | BLTU | B_TYPE | BRANCH |
-| **BGEU** | `imm..._rs2_rs1_111_..._1100011` | NOP | ZERO | FOUR | NOP | WORD | UNSIGNED | BGEU | B_TYPE | BRANCH |
+| 指令 | BitPattern | aluOp | op1Src | op2Src | lsuOp | lsuWidth | lsuSign | bruOp | immType | specialInstr | zicsrOp |
+| :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- |
+| **JAL** | `imm[20\|10:1\|11\|19:12]_rd_1101111` | NOP | ZERO | FOUR | NOP | WORD | UNSIGNED | JAL | J_TYPE | BRANCH | NOP |
+| **JALR** | `imm[11:0]_rs1_000_rd_1100111` | NOP | ZERO | FOUR | NOP | WORD | UNSIGNED | JALR | I_TYPE | BRANCH | NOP |
+| **BEQ** | `imm..._rs2_rs1_000_..._1100011` | NOP | ZERO | FOUR | NOP | WORD | UNSIGNED | BEQ | B_TYPE | BRANCH | NOP |
+| **BNE** | `imm..._rs2_rs1_001_..._1100011` | NOP | ZERO | FOUR | NOP | WORD | UNSIGNED | BNE | B_TYPE | BRANCH | NOP |
+| **BLT** | `imm..._rs2_rs1_100_..._1100011` | NOP | ZERO | FOUR | NOP | WORD | UNSIGNED | BLT | B_TYPE | BRANCH | NOP |
+| **BGE** | `imm..._rs2_rs1_101_..._1100011` | NOP | ZERO | FOUR | NOP | WORD | UNSIGNED | BGE | B_TYPE | BRANCH | NOP |
+| **BLTU** | `imm..._rs2_rs1_110_..._1100011` | NOP | ZERO | FOUR | NOP | WORD | UNSIGNED | BLTU | B_TYPE | BRANCH | NOP |
+| **BGEU** | `imm..._rs2_rs1_111_..._1100011` | NOP | ZERO | FOUR | NOP | WORD | UNSIGNED | BGEU | B_TYPE | BRANCH | NOP |
 
 #### 1.5 访存指令（Load/Store）
 
 **Opcode**: `0000011` (Load), `0100011` (Store)
 
-| 指令 | BitPattern | aluOp | op1Src | op2Src | lsuOp | lsuWidth | lsuSign | bruOp | immType | specialInstr |
-| :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- |
-| **LB** | `imm_rs1_000_rd_0000011` | ADD | REG | IMM | LOAD | BYTE | SIGNED | NOP | I_TYPE | NONE |
-| **LH** | `imm_rs1_001_rd_0000011` | ADD | REG | IMM | LOAD | HALF | SIGNED | NOP | I_TYPE | NONE |
-| **LW** | `imm_rs1_010_rd_0000011` | ADD | REG | IMM | LOAD | WORD | SIGNED | NOP | I_TYPE | NONE |
-| **LBU** | `imm_rs1_100_rd_0000011` | ADD | REG | IMM | LOAD | BYTE | UNSIGNED | NOP | I_TYPE | NONE |
-| **LHU** | `imm_rs1_101_rd_0000011` | ADD | REG | IMM | LOAD | HALF | UNSIGNED | NOP | I_TYPE | NONE |
-| **SB** | `imm[11:5]_rs2_rs1_000_imm[4:0]_0100011` | ADD | REG | IMM | STORE | BYTE | UNSIGNED | NOP | S_TYPE | STORE |
-| **SH** | `imm[11:5]_rs2_rs1_001_imm[4:0]_0100011` | ADD | REG | IMM | STORE | HALF | UNSIGNED | NOP | S_TYPE | STORE |
-| **SW** | `imm[11:5]_rs2_rs1_010_imm[4:0]_0100011` | ADD | REG | IMM | STORE | WORD | UNSIGNED | NOP | S_TYPE | STORE |
-| **FENCE** | `0000_pred_succ_00000_000_00000_0001111` | NOP | ZERO | FOUR | NOP | WORD | UNSIGNED | NOP | Z_TYPE | FENCE |
+| 指令 | BitPattern | aluOp | op1Src | op2Src | lsuOp | lsuWidth | lsuSign | bruOp | immType | specialInstr | zicsrOp |
+| :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- |
+| **LB** | `imm_rs1_000_rd_0000011` | ADD | REG | IMM | LOAD | BYTE | SIGNED | NOP | I_TYPE | NONE | NOP |
+| **LH** | `imm_rs1_001_rd_0000011` | ADD | REG | IMM | LOAD | HALF | SIGNED | NOP | I_TYPE | NONE | NOP |
+| **LW** | `imm_rs1_010_rd_0000011` | ADD | REG | IMM | LOAD | WORD | SIGNED | NOP | I_TYPE | NONE | NOP |
+| **LBU** | `imm_rs1_100_rd_0000011` | ADD | REG | IMM | LOAD | BYTE | UNSIGNED | NOP | I_TYPE | NONE | NOP |
+| **LHU** | `imm_rs1_101_rd_0000011` | ADD | REG | IMM | LOAD | HALF | UNSIGNED | NOP | I_TYPE | NONE | NOP |
+| **SB** | `imm[11:5]_rs2_rs1_000_imm[4:0]_0100011` | ADD | REG | IMM | STORE | BYTE | UNSIGNED | NOP | S_TYPE | STORE | NOP |
+| **SH** | `imm[11:5]_rs2_rs1_001_imm[4:0]_0100011` | ADD | REG | IMM | STORE | HALF | UNSIGNED | NOP | S_TYPE | STORE | NOP |
+| **SW** | `imm[11:5]_rs2_rs1_010_imm[4:0]_0100011` | ADD | REG | IMM | STORE | WORD | UNSIGNED | NOP | S_TYPE | STORE | NOP |
+| **FENCE** | `0000_pred_succ_00000_000_00000_0001111` | NOP | ZERO | FOUR | NOP | WORD | UNSIGNED | NOP | Z_TYPE | FENCE | NOP |
 
 ### 2. Zifencei 扩展指令
 
-| 指令 | BitPattern | aluOp | op1Src | op2Src | lsuOp | lsuWidth | lsuSign | bruOp | immType | specialInstr |
-| :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- |
-| **FENCE.I** | `000000000000_00000_001_00000_0001111` | NOP | ZERO | FOUR | NOP | WORD | UNSIGNED | NOP | Z_TYPE | FENCEI |
+| 指令 | BitPattern | aluOp | op1Src | op2Src | lsuOp | lsuWidth | lsuSign | bruOp | immType | specialInstr | zicsrOp |
+| :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- |
+| **FENCE.I** | `000000000000_00000_001_00000_0001111` | NOP | ZERO | FOUR | NOP | WORD | UNSIGNED | NOP | Z_TYPE | FENCEI | NOP |
 
 ### 3. Zicsr 扩展指令（CSR 访问）
 
 **Opcode**: `1110011` (System)
 
-| 指令 | BitPattern | aluOp | op1Src | op2Src | lsuOp | lsuWidth | lsuSign | bruOp | immType | specialInstr |
-| :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- |
-| **CSRRW** | `csr_rs1_001_rd_1110011` | NOP | REG | FOUR | NOP | WORD | UNSIGNED | NOP | I_TYPE | CSR |
-| **CSRRS** | `csr_rs1_010_rd_1110011` | NOP | REG | FOUR | NOP | WORD | UNSIGNED | NOP | I_TYPE | CSR |
-| **CSRRC** | `csr_rs1_011_rd_1110011` | NOP | REG | FOUR | NOP | WORD | UNSIGNED | NOP | I_TYPE | CSR |
-| **CSRRWI**| `csr_uimm_101_rd_1110011` | NOP | IMM | FOUR | NOP | WORD | UNSIGNED | NOP | I_TYPE | CSR |
-| **CSRRSI**| `csr_uimm_110_rd_1110011` | NOP | IMM | FOUR | NOP | WORD | UNSIGNED | NOP | I_TYPE | CSR |
-| **CSRRCI**| `csr_uimm_111_rd_1110011` | NOP | IMM | FOUR | NOP | WORD | UNSIGNED | NOP | I_TYPE | CSR |
+| 指令 | BitPattern | aluOp | op1Src | op2Src | lsuOp | lsuWidth | lsuSign | bruOp | immType | specialInstr | zicsrOp |
+| :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- |
+| **CSRRW** | `csr_rs1_001_rd_1110011` | NOP | REG | FOUR | NOP | WORD | UNSIGNED | NOP | I_TYPE | CSR | RW |
+| **CSRRS** | `csr_rs1_010_rd_1110011` | NOP | REG | FOUR | NOP | WORD | UNSIGNED | NOP | I_TYPE | CSR | RS |
+| **CSRRC** | `csr_rs1_011_rd_1110011` | NOP | REG | FOUR | NOP | WORD | UNSIGNED | NOP | I_TYPE | CSR | RC |
+| **CSRRWI**| `csr_uimm_101_rd_1110011` | NOP | IMM | FOUR | NOP | WORD | UNSIGNED | NOP | I_TYPE | CSR | RW |
+| **CSRRSI**| `csr_uimm_110_rd_1110011` | NOP | IMM | FOUR | NOP | WORD | UNSIGNED | NOP | I_TYPE | CSR | RS |
+| **CSRRCI**| `csr_uimm_111_rd_1110011` | NOP | IMM | FOUR | NOP | WORD | UNSIGNED | NOP | I_TYPE | CSR | RC |
 
 ### 4. 特权指令（Privileged Instructions）
 
 **Opcode**: `1110011` (System)
 
-| 指令 | BitPattern | aluOp | op1Src | op2Src | lsuOp | lsuWidth | lsuSign | bruOp | immType | specialInstr |
-| :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- |
-| **ECALL** | `000000000000_00000_000_00000_1110011` | NOP | ZERO | FOUR | NOP | WORD | UNSIGNED | NOP | Z_TYPE | ECALL |
-| **EBREAK**| `000000000001_00000_000_00000_1110011` | NOP | ZERO | FOUR | NOP | WORD | UNSIGNED | NOP | Z_TYPE | EBREAK |
-| **MRET** | `001100000010_00000_000_00000_1110011` | NOP | ZERO | FOUR | NOP | WORD | UNSIGNED | NOP | Z_TYPE | MRET |
-| **SRET** | `000100000010_00000_000_00000_1110011` | NOP | ZERO | FOUR | NOP | WORD | UNSIGNED | NOP | Z_TYPE | SRET |
-| **WFI** | `000100000101_00000_000_00000_1110011` | NOP | ZERO | FOUR | NOP | WORD | UNSIGNED | NOP | Z_TYPE | WFI |
-| **SFENCE.VMA** | `0001001_rs2_rs1_000_00000_1110011` | NOP | ZERO | FOUR | NOP | WORD | UNSIGNED | NOP | Z_TYPE | SFENCE |
+| 指令 | BitPattern | aluOp | op1Src | op2Src | lsuOp | lsuWidth | lsuSign | bruOp | immType | specialInstr | zicsrOp |
+| :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- |
+| **ECALL** | `000000000000_00000_000_00000_1110011` | NOP | ZERO | FOUR | NOP | WORD | UNSIGNED | NOP | Z_TYPE | ECALL | NOP |
+| **EBREAK**| `000000000001_00000_000_00000_1110011` | NOP | ZERO | FOUR | NOP | WORD | UNSIGNED | NOP | Z_TYPE | EBREAK | NOP |
+| **MRET** | `001100000010_00000_000_00000_1110011` | NOP | ZERO | FOUR | NOP | WORD | UNSIGNED | NOP | Z_TYPE | MRET | NOP |
+| **SRET** | `000100000010_00000_000_00000_1110011` | NOP | ZERO | FOUR | NOP | WORD | UNSIGNED | NOP | Z_TYPE | SRET | NOP |
+| **WFI** | `000100000101_00000_000_00000_1110011` | NOP | ZERO | FOUR | NOP | WORD | UNSIGNED | NOP | Z_TYPE | WFI | NOP |
+| **SFENCE.VMA** | `0001001_rs2_rs1_000_00000_1110011` | NOP | ZERO | FOUR | NOP | WORD | UNSIGNED | NOP | Z_TYPE | SFENCE | NOP |
 
 ---
 
@@ -198,6 +198,7 @@ class Decoder extends Module with CPUConfig {
   val lsuSign = Wire(LSUsign())
   val bruOp = Wire(BRUOp())
   val immType = Wire(ImmType())
+  val zicsrOp = Wire(ZicsrOp())
   
   // 指令类型标志
   val specialInstr = Wire(SpecialInstr())
@@ -332,6 +333,18 @@ class Decoder extends Module with CPUConfig {
     "b0010111".U -> ImmType.U_TYPE,
     "b1100111".U -> ImmType.I_TYPE,
     "b1110011".U -> ImmType.Z_TYPE
+  ))
+  
+  // Zicsr 操作解码
+  zicsrOp := MuxLookup(opcode, ZicsrOp.NOP, Seq(
+    "b1110011".U -> MuxLookup(funct3, ZicsrOp.NOP, Seq(
+      "b001".U -> ZicsrOp.RW,   // CSRRW
+      "b010".U -> ZicsrOp.RS,   // CSRRS
+      "b011".U -> ZicsrOp.RC,   // CSRRC
+      "b101".U -> ZicsrOp.RW,   // CSRRWI
+      "b110".U -> ZicsrOp.RS,   // CSRRSI
+      "b111".U -> ZicsrOp.RC    // CSRRCI
+    ))
   ))
 ```
 
@@ -531,6 +544,7 @@ class Decoder extends Module with CPUConfig {
   io.dispatch.bits.microOp.lsuWidth := lsuWidth
   io.dispatch.bits.microOp.lsuSign := lsuSign
   io.dispatch.bits.microOp.bruOp := bruOp
+  io.dispatch.bits.microOp.zicsrOp := zicsrOp
   io.dispatch.bits.pc := pc
   io.dispatch.bits.imm := imm
   io.dispatch.bits.prediction := prediction
@@ -595,6 +609,7 @@ class Decoder extends Module with CPUConfig {
   val lsuSign = Wire(LSUsign())
   val bruOp = Wire(BRUOp())
   val immType = Wire(ImmType())
+  val zicsrOp = Wire(ZicsrOp())
   
   // ========== ALU 操作解码 ==========
   aluOp := MuxLookup(opcode, ALU_NOP, Seq(
@@ -695,6 +710,18 @@ class Decoder extends Module with CPUConfig {
     "b0010111".U -> ImmType.U_TYPE,
     "b1100111".U -> ImmType.I_TYPE,
     "b1110011".U -> ImmType.Z_TYPE
+  ))
+  
+  // ========== Zicsr 操作解码 ==========
+  zicsrOp := MuxLookup(opcode, ZicsrOp.NOP, Seq(
+    "b1110011".U -> MuxLookup(funct3, ZicsrOp.NOP, Seq(
+      "b001".U -> ZicsrOp.RW,   // CSRRW
+      "b010".U -> ZicsrOp.RS,   // CSRRS
+      "b011".U -> ZicsrOp.RC,   // CSRRC
+      "b101".U -> ZicsrOp.RW,   // CSRRWI
+      "b110".U -> ZicsrOp.RS,   // CSRRSI
+      "b111".U -> ZicsrOp.RC    // CSRRCI
+    ))
   ))
   
   // ========== 特殊指令解码 ==========
@@ -846,6 +873,7 @@ class Decoder extends Module with CPUConfig {
   io.dispatch.bits.microOp.lsuWidth := lsuWidth
   io.dispatch.bits.microOp.lsuSign := lsuSign
   io.dispatch.bits.microOp.bruOp := bruOp
+  io.dispatch.bits.microOp.zicsrOp := zicsrOp
   io.dispatch.bits.pc := pc
   io.dispatch.bits.imm := imm
   io.dispatch.bits.prediction := prediction

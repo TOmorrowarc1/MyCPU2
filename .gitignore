@@ -8,6 +8,7 @@ project/project/
 .idea/
 .vscode/
 .bloop/
+*.conf
 
 # 忽略 Metals (VS Code 插件) 产物
 .metals/
