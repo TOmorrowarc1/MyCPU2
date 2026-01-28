@@ -4,11 +4,11 @@
 
 Fetcher 是流水线前端的第一级，主要负责以下核心功能：
 
-1. **PC 维护与更新**：维护当前程序计数器（`CurrentPC`）和下一周期程序计数器（`NextPC`），并根据各种控制信号正确更新 PC 值。
+1. **PC 维护与更新**：维护当前程序计数器（`currentPC`）和下一周期程序计数器（`nextPC`），并根据各种控制信号正确更新 PC 值。
 
 2. **取指请求发起**：向指令缓存（Icache）发起取指请求，通过 Decoupled 握手协议控制取指流程。
 
-3. **分支预测协调**：与分支预测模块（BranchPredict）交互，获取分支预测结果并据此更新 `NextPC`。
+3. **分支预测协调**：与分支预测模块（BranchPredict）交互，获取分支预测结果并据此更新 `nextPC`。
 
 4. **异常与冲刷响应**：响应来自 ROB 的全局冲刷（GlobalFlush）和来自 BRU 的分支冲刷（BranchFlush）信号，及时重定向 PC。
 
@@ -65,7 +65,7 @@ class IFetchPacket extends Bundle with CPUConfig {
 
 Fetcher 内部需要维护以下状态：
 
-- **NextPC 寄存器**：使用 `RegInit` 存储，初始值为复位地址（如 0x8000_0000）。
+  - **nextPC 寄存器**：使用 `RegInit` 存储，初始值为复位地址（如 0x8000_0000）。
   ```scala
   val nextPC = RegInit(0x80000000.U(32.W))
   ```

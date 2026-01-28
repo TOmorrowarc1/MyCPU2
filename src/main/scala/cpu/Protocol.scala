@@ -108,6 +108,15 @@ object InterruptCause {
   val MEI = 11.U(4.W)
 }
 
+object ZicsrOp extends ChiselEnum {
+  val RW, RS, RC, NOP = Value
+}
+
+// 特殊指令标记
+object SpecialInstr extends ChiselEnum {
+  val BRANCH, STORE, FENCE, FENCEI, CSR, MRET, SRET, SFENCE, ECALL, EBREAK, WFI, NONE = Value
+}
+
 // ============================================================================
 // 1. 通用元数据
 // ============================================================================
@@ -137,6 +146,12 @@ class IFetchPacket extends Bundle with CPUConfig {
   val privMode    = PrivMode()          
 }
 
+// Icache -> Decoder
+class IDecodePacket extends Bundle with CPUConfig {
+  val inst        = InstW
+  val instMetadata = new IFetchPacket
+}
+
 // Decoder -> ROB (ROB 占位)
 class ROBInitControlPacket extends Bundle with CPUConfig {
   val pc         = AddrW
@@ -152,49 +167,50 @@ class ROBInitControlPacket extends Bundle with CPUConfig {
 
 // Decoder -> RS (分派信息)
 class MicroOp extends Bundle {
-  val aluOp     = ALUOp()
   val op1Src    = Src1Sel()
   val op2Src    = Src2Sel()
+  val aluOp     = ALUOp()
   val lsuOp     = LSUOp()
   val lsuWidth  = LSUWidth()
   val lsuSign   = LSUsign()
   val bruOp     = BRUOp()
+  val zicsrOp   = ZicsrOp()
 }
 
 class DispatchPacket extends Bundle with CPUConfig {
-  val RobId     = RobTag
-  val MicroOp   = new MicroOp
-  val PC        = AddrW
-  val Imm       = DataW
-  val Prediction = new Prediction
-  val Exception  = new Exception
+  val robId     = RobTag
+  val microOp   = new MicroOp
+  val pc        = AddrW
+  val imm       = DataW
+  val prediction = new Prediction
+  val exception  = new Exception
 }
 
 // Decoder -> RAT (请求重命名)
 class RenameReq extends Bundle with CPUConfig {
-  val Rs1 = ArchTag
-  val Rs2 = ArchTag
-  val Rd  = ArchTag
-  val IsBranch = Bool() // 告诉 RAT 是否需要分配 Snapshot
+  val rs1 = ArchTag
+  val rs2 = ArchTag
+  val rd  = ArchTag
+  val isBranch = Bool() // 告诉 RAT 是否需要分配 Snapshot
 }
 
 // RAT -> ROB (ROB 占位：数据部分)
 class ROBinitDataPacket extends Bundle with CPUConfig {
-  val ArchRd    = ArchTag
-  val PhyRd     = PhyTag
-  val PhyOld    = PhyTag
-  val BranchMask = SnapshotMask
+  val archRd    = ArchTag
+  val phyRd     = PhyTag
+  val phyOld    = PhyTag
+  val branchMask = SnapshotMask
 }
 
 // RAT -> Dispatch (重命名结果)
 class RenameResPacket extends Bundle with CPUConfig {
-  val PhyRs1      = PhyTag // 源寄存器1 物理号
-  val Rs1Busy     = Bool() // 源寄存器1 是否 Busy (RS 判断是否需要监听 CDB)
-  val PhyRs2      = PhyTag
-  val Rs2Busy     = Bool()
-  val PhyRd       = PhyTag // 目标寄存器 物理号
+  val phyRs1      = PhyTag // 源寄存器1 物理号
+  val rs1Busy     = Bool() // 源寄存器1 是否 Busy (RS 判断是否需要监听 CDB)
+  val phyRs2      = PhyTag
+  val rs2Busy     = Bool()
+  val phyRd       = PhyTag // 目标寄存器 物理号
   val snapshotId  = SnapshotId // 分配的快照 ID (分支专用)
-  val BranchMask  = SnapshotMask            // 当前依赖的分支掩码
+  val branchMask  = SnapshotMask            // 当前依赖的分支掩码
 }
 
 // ============================================================================
@@ -218,26 +234,26 @@ class DataReq extends Bundle with CPUConfig {
   val src2Sel    = Src2Sel() 
   val src2Tag    = PhyTag
   val src2Busy   = Bool()
-  val Imm        = DataW
-  val PC        = AddrW
+  val imm        = DataW
+  val pc         = AddrW
 }
 
 class AluRSEntry extends Bundle with CPUConfig {
-  val AluOp      = ALUOp()
+  val aluOp      = ALUOp()
   val data = new DataReq
   val robId     = RobTag
   val phyRd    = PhyTag
-  val snapshotmask = SnapshotMask
+  val snapshotMask = SnapshotMask
   val exception = new Exception
 }
 
 class BruRSEntry extends Bundle with CPUConfig {
-  val BruOp      = BRUOp()
+  val bruOp      = BRUOp()
   val data = new DataReq
   val robId     = RobTag
   val phyRd    = PhyTag
   val snapshotId = SnapshotId
-  val snapshotmask = SnapshotMask
+  val snapshotMask = SnapshotMask
   val prediction = new Prediction
   val exception = new Exception
 }
@@ -270,20 +286,20 @@ class IssueMetaPacket extends Bundle with CPUConfig {
 class IssueDataPacket extends Bundle with CPUConfig {
   val src1Sel = Src1Sel()
   val src2Sel = Src2Sel()
-  val imm   = DataW
-  val pc    = AddrW
+  val imm     = DataW
+  val pc      = AddrW
 }
 
 // RS -> ALU
 class AluReq extends Bundle with CPUConfig {
-  val AluOp = ALUOp()
+  val aluOp = ALUOp()
   val meta = new IssueMetaPacket
   val data = new IssueDataPacket
 }
 
 // RS -> BRU
 class BruReq extends Bundle with CPUConfig {
-  val BruOp = BRUOp()
+  val bruOp = BRUOp()
   val prediction = new Prediction
   val meta = new IssueMetaPacket
   val data = new IssueDataPacket
@@ -291,12 +307,12 @@ class BruReq extends Bundle with CPUConfig {
 
 // Issue Stage -> EU (组合数据包)
 // 包含：控制信号 + 操作数(来自PRF/Imm/PC) + Tag
-class ALUPacket extends Bundle with CPUConfig {
+class AluPacket extends Bundle with CPUConfig {
   val aluReq = new AluReq
   val prfData = new PrfReadData
 }
 
-class BRUPacket extends Bundle with CPUConfig {
+class BruPacket extends Bundle with CPUConfig {
   val bruReq = new BruReq
   val prfData = new PrfReadData
 }
@@ -312,7 +328,7 @@ class BRUPacket extends Bundle with CPUConfig {
 // EU -> CDB -> ROB
 class CDBMessage extends Bundle with CPUConfig {
   val robId    = RobTag   // 用于 ROB 标记完成
-  val phyRd   = PhyTag    // 用于 RS 唤醒依赖指令 & PRF 写入
-  val data      = DataW   // 写入 PRF 的数据
-  val exception = new Exception // 执行阶段产生的异常 (修正了 Protocol.md 第313行的错误)
+  val phyRd    = PhyTag   // 用于 RS 唤醒依赖指令 & PRF 写入
+  val data     = DataW    // 写入 PRF 的数据
+  val exception = new Exception // 执行阶段产生的异常
 }

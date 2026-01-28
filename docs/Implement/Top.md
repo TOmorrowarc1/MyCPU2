@@ -19,13 +19,13 @@
 
 ### 1.2 Decoder
 *   **职责**：将指令解析到微指令；进行寄存器重命名请求与快照请求；异常检测。
-*   **输入**：来自 Icache 的 `{Instruction, PC, PrivMode, InsEpoch, Prediction, Exception}`；来自 ROB 的 `FreeRobID`， `GlobalFlush` `CSRDone` 与来自 BRU 的 `BranchFlush`。
+*   **输入**：来自 Icache 的 `{Instruction, PC, PrivMode, InsEpoch, Prediction, Exception}`；来自 ROB 的 `FreeRobID`， `GlobalFlush` `CSRPending` 与来自 BRU 的 `BranchFlush`。
 *   **逻辑简述**：
     *   **指令解析**：检测 `InsEpoch` 是否过期，若是则丢弃，否则继续解析。将 `Instruction` 解码为 `MinOps`（EU 使能信号）、`Data`（rd, rs1, rs2）、`Exceptions`（IF + Decode 可能的异常）。
     *   **寄存器重命名请求**：将 `Data` 送入 RAT，获取对应的物理寄存器号 `PhyRd` 和旧物理寄存器号 `PreRd` 以及依赖的数据。
     *   **快照请求**：若指令解析为分支指令，向 RAT 请求创建分支快照，即拉高 `IsBranch` 信号。
     *   **异常处理**：将 `Exceptions` 向 Dispatch 单元透传。
-    *   **阻塞逻辑**：若 ROB, RS, LSQ, 或 RAT Free List 满，拉低对 Icache 的 `ready`；如果解析出指令属于 Ziscr 扩展或是 Privileged ISA，拉高 `IFStall` 信号暂停取指，直到 CSR 指令完成（`CSRDone`）。
+    *   **阻塞逻辑**：若 ROB, RS, LSQ, 或 RAT Free List 满，拉低对 Icache 的 `ready`；如果解析出指令属于 Zicsr 扩展或是 Privileged ISA，或 `CSRPending` 信号为 1，则拉高 `IFStall` 信号试图暂停取指，直到 CSR 指令完成（`CSRPending` 置 0）。
 *   **输出**：
     *   向 RAT 发送 `{Data, IsBranch}` 请求。
     *   向 ROB 发送 `{RobID, Exception, Prediction}`。
@@ -79,7 +79,10 @@
 ### 2.4 LSU (Load Store Unit)
 *   **职责**：先写成最基本的 FIFO，之后慢慢处理。
 
-### 2.5 CBD (Common Bus Data)
+### 2.5 ZICSRU (Zicsr Instructions Unit)
+*   **职责**：复用重命名逻辑处理 CSR 读写指令，与 CSRsUnit 进行交互。因为 CSR 指令会暂停流水线，任何情况下最多只有一条指令等待执行。
+
+### 2.6 CBD (Common Bus Data)
 *   **职责**：多对一仲裁（ALU/BRU/LSU $\rightarrow$ 总线），将通过仲裁的指令结果广播到 RS、PRF 与 ROB。
 *   **输入**：
     *   来自 ALU、BRU、LSU 的 `{ResultRd, data, RobID, Exception}`。

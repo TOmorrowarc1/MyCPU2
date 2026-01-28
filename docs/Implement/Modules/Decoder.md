@@ -17,14 +17,14 @@ Decoder 模块是 Tomasulo 架构中的关键组件，负责将指令流解析�
 ## 输入输出
 
 ### 输入
-- 来自 Icache 的 [`IDecodePacket`](../../Implement/Protocol.md:139-142)：包含 `Instruction`, `PC`, `PrivMode`, `InsEpoch`, `Prediction`, `Exception`
+- 来自 Icache 的 [`IDecodePacket`](../../Implement/Protocol.md:139-142)：包含 `Instruction`, `pc`, `PrivMode`, `InsEpoch`, `prediction`, `exception`
 - 来自 ROB 的：`FreeRobID`, `GlobalFlush`, `CSRDone`
 - 来自 BRU 的：`BranchFlush`
 
 ### 输出
-- 向 RAT 发送：[`RenameReq`](../../Implement/Protocol.md:178-183) `{Data, IsBranch}`
-- 向 ROB 发送：[`ROBInitControlPacket`](../../Implement/Protocol.md:145-155) `{RobID, Exception, Prediction}`
-- 向 RS 发送：[`DispatchPacket`](../../Implement/Protocol.md:168-175) `{MinOps, Exceptions, RobID, Prediction}`
+- 向 RAT 发送：[`RenameReq`](../../Implement/Protocol.md:178-183) `{Data, isBranch}`
+- 向 ROB 发送：[`ROBInitControlPacket`](../../Implement/Protocol.md:145-155) `{robId, exception, prediction}`
+- 向 RS 发送：[`DispatchPacket`](../../Implement/Protocol.md:168-175) `{MinOps, Exceptions, robId, prediction}`
 - 向 Fetcher 发送：`IFStall`
 
 ## 第一部分：指令解析结果（使能信号部分）
@@ -420,10 +420,10 @@ class Decoder extends Module with CPUConfig {
 ```scala
   // 构建重命名请求
   io.renameReq.valid := io.in.valid && !hasException && !needStall && !globalFlush
-  io.renameReq.bits.Rs1 := rs1
-  io.renameReq.bits.Rs2 := rs2
-  io.renameReq.bits.Rd := rd
-  io.renameReq.bits.IsBranch := isBranch
+  io.renameReq.bits.rs1 := rs1
+  io.renameReq.bits.rs2 := rs2
+  io.renameReq.bits.rd := rd
+  io.renameReq.bits.isBranch := isBranch
 ```
 
 ### 6. 异常检测逻辑
@@ -520,21 +520,21 @@ class Decoder extends Module with CPUConfig {
   io.robInit.bits.isSret := (specialInstr === SpecialInstr.SRET)
   io.robInit.bits.isSFENCE := (specialInstr === SpecialInstr.SFENCE)
   io.robInit.bits.isFENCEI := (specialInstr === SpecialInstr.FENCEI)
-  
+
   // 分派包
   io.dispatch.valid := io.in.valid && !hasException && !needStall && !globalFlush
-  io.dispatch.bits.RobId := io.freeRobID
-  io.dispatch.bits.MicroOp.aluOp := aluOp
-  io.dispatch.bits.MicroOp.op1Src := op1Src
-  io.dispatch.bits.MicroOp.op2Src := op2Src
-  io.dispatch.bits.MicroOp.lsuOp := lsuOp
-  io.dispatch.bits.MicroOp.lsuWidth := lsuWidth
-  io.dispatch.bits.MicroOp.lsuSign := lsuSign
-  io.dispatch.bits.MicroOp.bruOp := bruOp
-  io.dispatch.bits.PC := pc
-  io.dispatch.bits.Imm := imm
-  io.dispatch.bits.Prediction := prediction
-  io.dispatch.bits.Exception := finalException
+  io.dispatch.bits.robId := io.freeRobID
+  io.dispatch.bits.microOp.aluOp := aluOp
+  io.dispatch.bits.microOp.op1Src := op1Src
+  io.dispatch.bits.microOp.op2Src := op2Src
+  io.dispatch.bits.microOp.lsuOp := lsuOp
+  io.dispatch.bits.microOp.lsuWidth := lsuWidth
+  io.dispatch.bits.microOp.lsuSign := lsuSign
+  io.dispatch.bits.microOp.bruOp := bruOp
+  io.dispatch.bits.pc := pc
+  io.dispatch.bits.imm := imm
+  io.dispatch.bits.prediction := prediction
+  io.dispatch.bits.exception := finalException
 ```
 
 ### 9. 完整的 Chisel 代码示例
@@ -821,11 +821,11 @@ class Decoder extends Module with CPUConfig {
   
   // ========== 输出数据打包 ==========
   io.renameReq.valid := io.in.valid && !hasException && !needStall && !io.globalFlush
-  io.renameReq.bits.Rs1 := rs1
-  io.renameReq.bits.Rs2 := rs2
-  io.renameReq.bits.Rd := rd
-  io.renameReq.bits.IsBranch := (specialInstr === SpecialInstr.BRANCH)
-  
+  io.renameReq.bits.rs1 := rs1
+  io.renameReq.bits.rs2 := rs2
+  io.renameReq.bits.rd := rd
+  io.renameReq.bits.isBranch := (specialInstr === SpecialInstr.BRANCH)
+
   io.robInit.valid := io.in.valid && !hasException && !needStall && !io.globalFlush
   io.robInit.bits.pc := pc
   io.robInit.bits.prediction := prediction
@@ -836,20 +836,20 @@ class Decoder extends Module with CPUConfig {
   io.robInit.bits.isSret := (specialInstr === SpecialInstr.SRET)
   io.robInit.bits.isSFENCE := (specialInstr === SpecialInstr.SFENCE)
   io.robInit.bits.isFENCEI := (specialInstr === SpecialInstr.FENCEI)
-  
+
   io.dispatch.valid := io.in.valid && !hasException && !needStall && !io.globalFlush
-  io.dispatch.bits.RobId := io.freeRobID
-  io.dispatch.bits.MicroOp.aluOp := aluOp
-  io.dispatch.bits.MicroOp.op1Src := op1Src
-  io.dispatch.bits.MicroOp.op2Src := op2Src
-  io.dispatch.bits.MicroOp.lsuOp := lsuOp
-  io.dispatch.bits.MicroOp.lsuWidth := lsuWidth
-  io.dispatch.bits.MicroOp.lsuSign := lsuSign
-  io.dispatch.bits.MicroOp.bruOp := bruOp
-  io.dispatch.bits.PC := pc
-  io.dispatch.bits.Imm := imm
-  io.dispatch.bits.Prediction := prediction
-  io.dispatch.bits.Exception := finalException
+  io.dispatch.bits.robId := io.freeRobID
+  io.dispatch.bits.microOp.aluOp := aluOp
+  io.dispatch.bits.microOp.op1Src := op1Src
+  io.dispatch.bits.microOp.op2Src := op2Src
+  io.dispatch.bits.microOp.lsuOp := lsuOp
+  io.dispatch.bits.microOp.lsuWidth := lsuWidth
+  io.dispatch.bits.microOp.lsuSign := lsuSign
+  io.dispatch.bits.microOp.bruOp := bruOp
+  io.dispatch.bits.pc := pc
+  io.dispatch.bits.imm := imm
+  io.dispatch.bits.prediction := prediction
+  io.dispatch.bits.exception := finalException
 }
 ```
 
