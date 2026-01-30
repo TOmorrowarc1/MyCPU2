@@ -110,6 +110,27 @@
 *   **输出**：
     *   向 CBD 发送 `{RobID, Result(OldValue), Exception}` (用于写回 `rd`)。
 
+### 2.5 LSU (Load Store Unit)
+*   **组成**：LSQ (访存队列), AGU (地址生成), MMU, PMP, Cache(Cache + AXI + MainMemory)。
+*   **职责**：处理所有内存访问，维护访存顺序一致性，处理虚实地址转换与权限检查。
+*   **输入**：
+    *   来自 RS 的 `{LSUOp, Imm, RobID, PrivMode, D-Epoch, BranchMask}`。
+    *   来自 PRF 的 `{BaseAddr, StoreData}`。
+    *   来自 ROB 的 `CommitStore/CommitIO` 信号。
+    *   来自 Memory Access System 的 `MemResponse`。
+*   **逻辑简述**：
+    *   **AGU**：计算 `VA = Base + Imm`。
+    *   **翻译与检查**：请求 TLB 进行 VA->PA 转换，并发进行 PMP/PMA 检查。若异常，标记 `Exception`。
+    *   **Load 处理**：
+        *   若 PMA 为 RAM：查 Store Queue (Forwarding)，若无冲突则发往 D-Cache。
+        *   若 PMA 为 I/O：进入 `Wait_Commit` 状态，等待 ROB 信号。
+    *   **Store 处理**：将 `{PA, StoreData}` 写入 Store Queue。**不发送总线请求**，等待 ROB Commit 信号。
+    *   **冲刷**：响应 `GlobalFlush` (清空所有) 和 `BranchFlush` (根据 Mask 清空 Load，Store 保留直到退休)。
+*   **输出**：
+    *   向 CBD 发送 `{RobID, LoadData, Exception}`。
+    *   向 Memory Access System 发送 `{Req, D-Epoch}`。
+    *   向 ROB 发送 `StoreAck`。
+
 ### 2.6 CBD (Common Bus Data)
 *   **职责**：多对一仲裁（ALU/BRU/LSU/ZICSRU $\rightarrow$ 总线），将通过仲裁的指令结果广播到 RS、PRF 与 ROB。
 *   **输入**：
@@ -143,18 +164,19 @@
         * 异常信息：`exception`。
         * 分支预测信息：`branchMask` 代表依赖分支用于冲刷，`prediction` 代表预测结果，用于之后的 BTB 更新。
         * 特殊指令标记：`specialInstr` 用于标记 CSR 指令与 xRET 指令等可能提交时有特殊作用的指令。 
+        * 特判：`hasSideEffect` 标记该指令是否有副作用，专门用于处理非幂等区域 Load 该需要被计算出提交后执行的指令。
     *   **全局控制信息维护** ：管理纪元信息 `IEpoch` 与 `DEpoch`，用于内存访问的顺序一致性维护，分别在分支冲刷或全局冲刷，和仅全局冲刷时更新；管理 `CSRPending` 信号，标记 CSR 指令或某些改变 CSR 状态指令正在提交中以阻塞前端取指。
     *   **指令入队**：当 ROB 未满时，将 Decoder 输入接口 `ready` 拉高，输出对应 `RobTail` 位置创建新 Entry，根据 Decoder 与 RAT 输入填写对应信息，置 `busy = 1`，`completed = 0`，如果进入时指令已经出现异常则 `complete = 1`。
-    *   **指令完成**：当 CBD 送入 `{RobID, Exception, phyRd, data}` 时，找到对应 Entry，将 `completed` 置 1，若 `Exception` 有效则更新 Entry 的 `Exception` 字段。
+    *   **指令完成**：当 CBD 送入 `{RobID, Exception, phyRd, data, hasSideEffect}` 时，找到对应 Entry，将 `completed` 置 1，若 `Exception` 有效则更新 Entry 的 `Exception` 字段。
     *   **分支冲刷**：当 BRU 送入 `{snapshotId, branchFlush, redirectPC}` 时，若 `branchFlush` 有效则根据 `snapshotId` 定位到对应分支指令，清除所有依赖该分支的 Entry（通过 `branchMask` 位运算）并更新 `IEpoch`，若否则单纯移除 `branchMask`。依据预测结果更新 `prediction` 字段以便提交时用于更新 BTB。 
     *   **提交状态机**：
         1.  **Check Head**：若 `!completed`，等待。
         2.  **Handle Exception**：若 `exception.valid`，触发 `globalFlush`，更新 CSR (`mcause/mepc`)，跳转 `mtvec`。
         3.  **Handle Serialization**：
-            *   若为 **Store**：在局部维护一个状态机，进入 `wait_store` 模式并发信号给 LSU，等待从总线传来的第二次对应 `robId` 信号然后退休。
-                > 不排除在过程中出现异常可能，ROB 行为取决于第二次总线信号
+            *   若为 **Store** 或 **hasSideEffect 为 1** ：在局部维护一个状态机，进入 `wait_done` 模式并发信号给 LSU，等待从总线传来的第二次对应 `robId` 信号然后退休。
+                > 不排除在过程中出现异常可能，ROB 行为取决于第二次总线信号。
             *   若为 **CSR Write**：在局部维护一个状态机，发信号给 ZICSRU 并等待总线上的第二次对应信号，然后触发 `globalFlush` 并退休。
-                > 不排除在过程中出现异常可能，ROB 行为取决于第二次总线信号
+                > 不排除在过程中出现异常可能，ROB 行为取决于第二次总线信号。
             *   若为 **xRET**：触发 `globalFlush`，向 CSRsUnit 发送对应信息，行为类似于 handle exception。
             *   若为 **WFI**：当做 NOP 处理，直接退休。
             *   若为 **FENCE.I**：直接退休。

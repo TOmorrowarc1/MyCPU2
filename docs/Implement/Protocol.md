@@ -175,6 +175,7 @@ class DispatchPacket extends Bundle with CPUConfig {
   val microOp   = new MicroOp
   val pc        = AddrW
   val imm       = DataW
+  val privMode  = PrivMode()
   val prediction = new Prediction
   val exception  = new Exception
 }
@@ -310,7 +311,6 @@ class BruPacket extends Bundle with CPUConfig {
   val prfData = new PrfReadData
 }
 
-// 与 LSU 相关部分尚未定义 (TODO)
 ```
 
 ### 5. 写回与广播 (Writeback & CDB)
@@ -323,6 +323,7 @@ class CDBMessage extends Bundle with CPUConfig {
   val robId    = RobTag   // 用于 ROB 标记完成
   val phyRd    = PhyTag   // 用于 RS 唤醒依赖指令 & PRF 写入
   val data     = DataW    // 写入 PRF 的数据
+  val hasSideEffect = Bits(1.W) // 是否有副作用（非幂等 Load 指令专用）
   val exception = new Exception // 执行阶段产生的异常
 }
 ```
