@@ -38,6 +38,7 @@ class Decoder extends Module with CPUConfig {
   val rs2 = inst(24, 20)
   val funct7 = inst(31, 25)
   val funct12 = inst(31, 20)
+  val csrAddr = funct12
 
   // ========== 元数据透传 ==========
   val pc = io.in.bits.instMetadata.pc
@@ -155,7 +156,6 @@ class Decoder extends Module with CPUConfig {
     decodeException.tval := pc
   }.elsewhen(isCsr) {
     // 1. CSR 基础信息提取
-    val csrAddr = funct12
     val csrRequiredPriv = csrAddr(9, 8) // [9:8] 指示最低特权级
     val csrReadOnly = csrAddr(11, 10) === "b11".U // [11:10] 为 11 表示只读
     // 2. 特权级合法性检查 (Privilege Level Check)
@@ -264,6 +264,7 @@ class Decoder extends Module with CPUConfig {
   io.dispatch.bits.microOp.zicsrOp := zicsrOp
   io.dispatch.bits.pc := pc
   io.dispatch.bits.imm := imm
+  io.dispatch.bits.csrAddr := csrAddr
   io.dispatch.bits.prediction := prediction
   io.dispatch.bits.exception := finalException
 }
