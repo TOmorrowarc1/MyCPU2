@@ -154,24 +154,30 @@ class Decoder extends Module with CPUConfig {
     decodeException.cause := ExceptionCause.ILLEGAL_INSTRUCTION
     decodeException.tval := pc
   }.elsewhen(isCsr) {
-    // CSR 权限检测
-    // CSR 地址空间的 [9:8] 位指示访问该 CSR 所需的最低特权级（00=U, 01=S, 11=M）
-    // 若尝试越权访问 CSR，将触发 Illegal Instruction Exception
+    // 1. CSR 基础信息提取
     val csrAddr = funct12
-    val csrRequiredPriv = csrAddr(9, 8) // 提取 CSR 所需特权级
-    val isCsrAccessLegal = MuxCase(
+    val csrRequiredPriv = csrAddr(9, 8) // [9:8] 指示最低特权级
+    val csrReadOnly = csrAddr(11, 10) === "b11".U // [11:10] 为 11 表示只读
+    // 2. 特权级合法性检查 (Privilege Level Check)
+    // 规则：当前特权级 (privMode) >= CSR 所需特权级 (csrRequiredPriv)
+    val isPrivLegal = MuxCase(
       false.B,
       Seq(
-        (csrRequiredPriv === "b00".U(
-          2.W
-        )) -> (privMode === PrivMode.U || privMode === PrivMode.S || privMode === PrivMode.M),
-        (csrRequiredPriv === "b01".U(
-          2.W
-        )) -> (privMode === PrivMode.S || privMode === PrivMode.M),
-        (csrRequiredPriv === "b11".U(2.W)) -> (privMode === PrivMode.M)
+        (csrRequiredPriv === "b00".U) -> true.B,
+        (csrRequiredPriv === "b01".U) -> (privMode === PrivMode.S || privMode === PrivMode.M),
+        (csrRequiredPriv === "b11".U) -> (privMode === PrivMode.M)
       )
     )
-    // CSR 指令越权访问异常
+    // 3. 写入行为判定 (Write Attempt Check)
+    // - CSRRW / CSRRWI (funct3[1:0] = 01): 总是写入
+    // - CSRRS / CSRRC / CSRRSI / CSRRCI (funct3[1:0] = 10 or 11): 仅当 rs1/uimm != 0 时写入
+    val isCsrWrite = (funct3(1) === 0.B) || (rs1 =/= 0.U)
+    // 4. 读写权限合法性检查：如果 CSR 是只读的，且当前指令尝试写入，则非法
+    val isRwLegal = !(csrReadOnly && isCsrWrite)
+    // 5. 综合判定：必须同时满足特权级要求 和 读写权限要求
+    val isCsrAccessLegal = isPrivLegal && isRwLegal
+
+    // CSR 访问异常处理
     when(!isCsrAccessLegal) {
       decodeException.valid := true.B
       decodeException.cause := ExceptionCause.ILLEGAL_INSTRUCTION
@@ -220,11 +226,11 @@ class Decoder extends Module with CPUConfig {
     specialInstr === SpecialInstr.SFENCE
 
   // Stall 条件
-  needStall := robFull || rsFull || ratFull || csrDecoding || io.csrPending
+  needStall := robFull || rsFull || ratFull || io.csrPending
   // Flush 条件
   needFlush := io.branchFlush || io.globalFlush
   // 向 Fetcher 发送 Stall 信号
-  io.ifStall := needStall && !needFlush
+  io.ifStall := (needStall || csrDecoding) && !needFlush
   // 向 Icache 发送 ready 信号
   io.in.ready := !(needStall || needFlush)
   // 生成该阶段 valid 信号
@@ -235,7 +241,7 @@ class Decoder extends Module with CPUConfig {
   io.renameReq.valid := decoderValid
   io.renameReq.bits.rs1 := rs1
   io.renameReq.bits.rs2 := rs2
-  io.renameReq.bits.rd := rd
+  io.renameReq.bits.rd := Mux(hasException, 0.U, rd)
   io.renameReq.bits.isBranch := (specialInstr === SpecialInstr.BRANCH)
 
   // ROB 初始化控制包
