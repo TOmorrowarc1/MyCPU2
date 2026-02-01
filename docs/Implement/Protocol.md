@@ -10,6 +10,7 @@ trait CPUConfig {
   val AddrWidth = 32
   val InstWidth = 32
   val DataWidth = 32
+  val CsrAddrWidth = 12
   
   // 规模参数 (建议参数化，这里先给定具体位宽)
   val RobIdWidth = 5       // 支持 32 条指令乱序
@@ -21,6 +22,7 @@ trait CPUConfig {
   def InstW = UInt(InstWidth.W)
   def AddrW = UInt(AddrWidth.W)
   def DataW = UInt(DataWidth.W)
+  def CsrAddrW = UInt(CsrAddrWidth.W)
   def RobTag = UInt(RobIdWidth.W)
   def PhyTag = UInt(PhyRegIdWidth.W)
   def ArchTag = UInt(ArchRegIdWidth.W)
