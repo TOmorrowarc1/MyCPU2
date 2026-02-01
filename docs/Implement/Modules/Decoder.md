@@ -2,7 +2,7 @@
 
 ## 概述
 
-Decoder 模块是 Tomasulo 架构中的关键组件，负责将指令流解析为微操作（MicroOp），进行寄存器重命名请求，检测异常，并控制流水线的流动。
+Decoder 模块是 Tomasulo 架构中的关键组件，负责将指令流解析为微操作（MicroOp），进行寄存器重命名请求，检测异常，并控制流水线的流动。对应两个文件：`Instructions.scala` （放置指令查找表）与 `Decoder.scala` （实现 Decoder 模块逻辑）。
 
 ## 职责
 
@@ -233,125 +233,210 @@ class Decoder extends Module with CPUConfig {
 
 ##### 2.2.1 使用 LookupTable 进行指令分类
 
+这部分逻辑放置在 `Instructions.scala` 文件中，定义了一个指令解码查找表 `decodeTable`，用于将指令的 bitpattern 映射到对应的解码信息。主要分为线束定义，辅助函数与解码表定义三部分：
+
 ```scala
-  // 定义指令解码表项
-  case class DecodeEntry(
-    aluOp: ALUOp.Type,
-    op1Src: Src1Sel.Type,
-    op2Src: Src2Sel.Type,
-    lsuOp: LSUOp.Type,
-    lsuWidth: LSUWidth.Type,
-    lsuSign: LSUsign.Type,
-    bruOp: BRUOp.Type,
-    immType: ImmType.Type,
-    specialInstr: SpecialInstr.Type,
-    zicsrOp: ZicsrOp.Type,
-    isLegal: Bool  // 指令是否合法（基于完整 32 位 bitpattern）
+package cpu
+
+import chisel3._
+import chisel3.util._
+import chisel3.experimental.BundleLiterals._ // 必须引入，用于在 Module 外创建硬件字面量
+
+// 1. DecodeEntry 定义：指令生成的“样板”
+class DecodeEntry extends Bundle with CPUConfig {
+  val aluOp        = ALUOp()          // ALU 操作码
+  val op1Src       = Src1Sel()        // 操作数 1 来源 (Reg/PC/Zero)
+  val op2Src       = Src2Sel()        // 操作数 2 来源 (Reg/Imm/Four)
+  val lsuOp        = LSUOp()          // 访存类型 (Load/Store/None)
+  val lsuWidth     = LSUWidth()       // 访存位宽 (B/H/W)
+  val lsuSign      = LSUsign()        // 访存符号扩展
+  val bruOp        = BRUOp()          // 分支跳转类型
+  val immType      = ImmType()        // 立即数解码格式
+  val specialInstr = SpecialInstr()   // 特殊指令标记 (CSR/System/Fence)
+  val zicsrOp      = ZicsrOp()        // CSR 操作类型
+  val isLegal      = Bool()           // 指令合法性
+}
+
+// 2. 指令集数据库对象
+object Instructions extends CPUConfig {
+
+  // 辅助函数: 快速生成一个 DecodeEntry 字面量 (L2 -> L3 Literal)
+    
+  def D(alu: ALUOp.Type, op1: Src1Sel.Type, op2: Src2Sel.Type, 
+        lsu: LSUOp.Type, lsuW: LSUWidth.Type, lsuS: LSUsign.Type,
+        bru: BRUOp.Type, imm: ImmType.Type, spec: SpecialInstr.Type, 
+        csr: ZicsrOp.Type): DecodeEntry = {
+    
+    // 使用 .Lit 构造硬件常数，这不属于任何 Module 作用域
+    (new DecodeEntry).Lit(
+      _.aluOp        -> alu,
+      _.op1Src       -> op1,
+      _.op2Src       -> op2,
+      _.lsuOp        -> lsu,
+      _.lsuWidth     -> lsuW,
+      _.lsuSign      -> lsuS,
+      _.bruOp        -> bru,
+      _.immType      -> imm,
+      _.specialInstr -> spec,
+      _.zicsrOp      -> csr,
+      _.isLegal      -> true.B // 表项中的指令均为合法
+    )
+  }
+
+
+  // 默认对象: 当 MuxLookup 没匹配到时的输出，标记为非法指令，用于触发异常。
+  def default = (new DecodeEntry).Lit(
+    _.aluOp        -> ALUOp.NOP,
+    _.op1Src       -> Src1Sel.ZERO,
+    _.op2Src       -> Src2Sel.FOUR,
+    _.lsuOp        -> LSUOp.NOP,
+    _.lsuWidth     -> LSUWidth.WORD,
+    _.lsuSign      -> LSUsign.UNSIGNED,
+    _.bruOp        -> BRUOp.NOP,
+    _.immType      -> ImmType.R_TYPE,
+    _.specialInstr -> SpecialInstr.NONE,
+    _.zicsrOp      -> ZicsrOp.NOP,
+    _.isLegal      -> false.B
   )
 
-  // 定义默认解码表项（非法指令）
-  val defaultEntry = DecodeEntry(
-    aluOp = ALUOp.NOP,
-    op1Src = Src1Sel.ZERO,
-    op2Src = Src2Sel.FOUR,
-    lsuOp = LSUOp.NOP,
-    lsuWidth = LSUWidth.WORD,
-    lsuSign = LSUsign.UNSIGNED,
-    bruOp = BRUOp.NOP,
-    immType = ImmType.R_TYPE,
-    specialInstr = SpecialInstr.NONE,
-    zicsrOp = ZicsrOp.NOP,
-    isLegal = false.B  // 默认为非法指令
+  // 3. 查找表 (Lookup Table)
+  // 分门别类定义，最后通过 ++ 合并，方便维护。
+  
+  // BitPat -> ALUOp Src1 Src2 LSUOp LSUWidth LSUSign BRUOp ImmType SpecInstr ZicsrOp
+
+  // RV32I 基础整数运算 - R-Type (opcode: 0110011)
+  private val rv32i_rtype = Seq(
+    BitPat("b0000000_?????_?????_000_?????_0110011") -> D(ALUOp.ADD,  Src1Sel.REG, Src2Sel.REG, LSUOp.NOP,   LSUWidth.WORD, LSUsign.UNSIGNED, BRUOp.NOP,  ImmType.R_TYPE, SpecialInstr.NONE, ZicsrOp.NOP), // ADD
+    BitPat("b0100000_?????_?????_000_?????_0110011") -> D(ALUOp.SUB,  Src1Sel.REG, Src2Sel.REG, LSUOp.NOP,   LSUWidth.WORD, LSUsign.UNSIGNED, BRUOp.NOP,  ImmType.R_TYPE, SpecialInstr.NONE, ZicsrOp.NOP), // SUB
+    BitPat("b0000000_?????_?????_001_?????_0110011") -> D(ALUOp.SLL,  Src1Sel.REG, Src2Sel.REG, LSUOp.NOP,   LSUWidth.WORD, LSUsign.UNSIGNED, BRUOp.NOP,  ImmType.R_TYPE, SpecialInstr.NONE, ZicsrOp.NOP), // SLL
+    BitPat("b0000000_?????_?????_010_?????_0110011") -> D(ALUOp.SLT,  Src1Sel.REG, Src2Sel.REG, LSUOp.NOP,   LSUWidth.WORD, LSUsign.UNSIGNED, BRUOp.NOP,  ImmType.R_TYPE, SpecialInstr.NONE, ZicsrOp.NOP), // SLT
+    BitPat("b0000000_?????_?????_011_?????_0110011") -> D(ALUOp.SLTU, Src1Sel.REG, Src2Sel.REG, LSUOp.NOP,   LSUWidth.WORD, LSUsign.UNSIGNED, BRUOp.NOP,  ImmType.R_TYPE, SpecialInstr.NONE, ZicsrOp.NOP), // SLTU
+    BitPat("b0000000_?????_?????_100_?????_0110011") -> D(ALUOp.XOR,  Src1Sel.REG, Src2Sel.REG, LSUOp.NOP,   LSUWidth.WORD, LSUsign.UNSIGNED, BRUOp.NOP,  ImmType.R_TYPE, SpecialInstr.NONE, ZicsrOp.NOP), // XOR
+    BitPat("b0000000_?????_?????_101_?????_0110011") -> D(ALUOp.SRL,  Src1Sel.REG, Src2Sel.REG, LSUOp.NOP,   LSUWidth.WORD, LSUsign.UNSIGNED, BRUOp.NOP,  ImmType.R_TYPE, SpecialInstr.NONE, ZicsrOp.NOP), // SRL
+    BitPat("b0100000_?????_?????_101_?????_0110011") -> D(ALUOp.SRA,  Src1Sel.REG, Src2Sel.REG, LSUOp.NOP,   LSUWidth.WORD, LSUsign.UNSIGNED, BRUOp.NOP,  ImmType.R_TYPE, SpecialInstr.NONE, ZicsrOp.NOP), // SRA
+    BitPat("b0000000_?????_?????_110_?????_0110011") -> D(ALUOp.OR,   Src1Sel.REG, Src2Sel.REG, LSUOp.NOP,   LSUWidth.WORD, LSUsign.UNSIGNED, BRUOp.NOP,  ImmType.R_TYPE, SpecialInstr.NONE, ZicsrOp.NOP), // OR
+    BitPat("b0000000_?????_?????_111_?????_0110011") -> D(ALUOp.AND,  Src1Sel.REG, Src2Sel.REG, LSUOp.NOP,   LSUWidth.WORD, LSUsign.UNSIGNED, BRUOp.NOP,  ImmType.R_TYPE, SpecialInstr.NONE, ZicsrOp.NOP), // AND
   )
 
-  // 定义指令解码查找表
-  val decodeTable = VecInit(Seq(
-    // RV32I 基础整数指令 - R-Type (opcode: 0110011)
-    "b0000000_00000_000_00000_0110011".U -> DecodeEntry(ALUOp.ADD, Src1Sel.REG, Src2Sel.REG, LSUOp.NOP, LSUWidth.WORD, LSUsign.UNSIGNED, BRUOp.NOP, ImmType.R_TYPE, SpecialInstr.NONE, ZicsrOp.NOP, true.B),  // ADD
-    "b0100000_00000_000_00000_0110011".U -> DecodeEntry(ALUOp.SUB, Src1Sel.REG, Src2Sel.REG, LSUOp.NOP, LSUWidth.WORD, LSUsign.UNSIGNED, BRUOp.NOP, ImmType.R_TYPE, SpecialInstr.NONE, ZicsrOp.NOP, true.B),  // SUB
-    "b0000000_00000_001_00000_0110011".U -> DecodeEntry(ALUOp.SLL, Src1Sel.REG, Src2Sel.REG, LSUOp.NOP, LSUWidth.WORD, LSUsign.UNSIGNED, BRUOp.NOP, ImmType.R_TYPE, SpecialInstr.NONE, ZicsrOp.NOP, true.B),  // SLL
-    "b0000000_00000_010_00000_0110011".U -> DecodeEntry(ALUOp.SLT, Src1Sel.REG, Src2Sel.REG, LSUOp.NOP, LSUWidth.WORD, LSUsign.UNSIGNED, BRUOp.NOP, ImmType.R_TYPE, SpecialInstr.NONE, ZicsrOp.NOP, true.B),  // SLT
-    "b0000000_00000_011_00000_0110011".U -> DecodeEntry(ALUOp.SLTU, Src1Sel.REG, Src2Sel.REG, LSUOp.NOP, LSUWidth.WORD, LSUsign.UNSIGNED, BRUOp.NOP, ImmType.R_TYPE, SpecialInstr.NONE, ZicsrOp.NOP, true.B), // SLTU
-    "b0000000_00000_100_00000_0110011".U -> DecodeEntry(ALUOp.XOR, Src1Sel.REG, Src2Sel.REG, LSUOp.NOP, LSUWidth.WORD, LSUsign.UNSIGNED, BRUOp.NOP, ImmType.R_TYPE, SpecialInstr.NONE, ZicsrOp.NOP, true.B),  // XOR
-    "b0000000_00000_101_00000_0110011".U -> DecodeEntry(ALUOp.SRL, Src1Sel.REG, Src2Sel.REG, LSUOp.NOP, LSUWidth.WORD, LSUsign.UNSIGNED, BRUOp.NOP, ImmType.R_TYPE, SpecialInstr.NONE, ZicsrOp.NOP, true.B),  // SRL
-    "b0100000_00000_101_00000_0110011".U -> DecodeEntry(ALUOp.SRA, Src1Sel.REG, Src2Sel.REG, LSUOp.NOP, LSUWidth.WORD, LSUsign.UNSIGNED, BRUOp.NOP, ImmType.R_TYPE, SpecialInstr.NONE, ZicsrOp.NOP, true.B),  // SRA
-    "b0000000_00000_110_00000_0110011".U -> DecodeEntry(ALUOp.OR, Src1Sel.REG, Src2Sel.REG, LSUOp.NOP, LSUWidth.WORD, LSUsign.UNSIGNED, BRUOp.NOP, ImmType.R_TYPE, SpecialInstr.NONE, ZicsrOp.NOP, true.B),  // OR
-    "b0000000_00000_111_00000_0110011".U -> DecodeEntry(ALUOp.AND, Src1Sel.REG, Src2Sel.REG, LSUOp.NOP, LSUWidth.WORD, LSUsign.UNSIGNED, BRUOp.NOP, ImmType.R_TYPE, SpecialInstr.NONE, ZicsrOp.NOP, true.B),  // AND
+  // RV32I 基础整数运算 - I-Type (opcode: 0010011)
+  private val rv32i_itype = Seq(
+    BitPat("b?????????????_000_?????_0010011")        -> D(ALUOp.ADD,  Src1Sel.REG, Src2Sel.IMM, LSUOp.NOP,   LSUWidth.WORD, LSUsign.UNSIGNED, BRUOp.NOP,  ImmType.I_TYPE, SpecialInstr.NONE, ZicsrOp.NOP), // ADDI
+    BitPat("b?????????????_010_?????_0010011")        -> D(ALUOp.SLT,  Src1Sel.REG, Src2Sel.IMM, LSUOp.NOP,   LSUWidth.WORD, LSUsign.UNSIGNED, BRUOp.NOP,  ImmType.I_TYPE, SpecialInstr.NONE, ZicsrOp.NOP), // SLTI
+    BitPat("b?????????????_011_?????_0010011")        -> D(ALUOp.SLTU, Src1Sel.REG, Src2Sel.IMM, LSUOp.NOP,   LSUWidth.WORD, LSUsign.UNSIGNED, BRUOp.NOP,  ImmType.I_TYPE, SpecialInstr.NONE, ZicsrOp.NOP), // SLTIU
+    BitPat("b?????????????_100_?????_0010011")        -> D(ALUOp.XOR,  Src1Sel.REG, Src2Sel.IMM, LSUOp.NOP,   LSUWidth.WORD, LSUsign.UNSIGNED, BRUOp.NOP,  ImmType.I_TYPE, SpecialInstr.NONE, ZicsrOp.NOP), // XORI
+    BitPat("b?????????????_110_?????_0010011")        -> D(ALUOp.OR,   Src1Sel.REG, Src2Sel.IMM, LSUOp.NOP,   LSUWidth.WORD, LSUsign.UNSIGNED, BRUOp.NOP,  ImmType.I_TYPE, SpecialInstr.NONE, ZicsrOp.NOP), // ORI
+    BitPat("b?????????????_111_?????_0010011")        -> D(ALUOp.AND,  Src1Sel.REG, Src2Sel.IMM, LSUOp.NOP,   LSUWidth.WORD, LSUsign.UNSIGNED, BRUOp.NOP,  ImmType.I_TYPE, SpecialInstr.NONE, ZicsrOp.NOP), // ANDI
+    BitPat("b0000000_?????_001_?????_0010011")        -> D(ALUOp.SLL,  Src1Sel.REG, Src2Sel.IMM, LSUOp.NOP,   LSUWidth.WORD, LSUsign.UNSIGNED, BRUOp.NOP,  ImmType.I_TYPE, SpecialInstr.NONE, ZicsrOp.NOP), // SLLI
+    BitPat("b0000000_?????_101_?????_0010011")        -> D(ALUOp.SRL,  Src1Sel.REG, Src2Sel.IMM, LSUOp.NOP,   LSUWidth.WORD, LSUsign.UNSIGNED, BRUOp.NOP,  ImmType.I_TYPE, SpecialInstr.NONE, ZicsrOp.NOP), // SRLI
+    BitPat("b0100000_?????_101_?????_0010011")        -> D(ALUOp.SRA,  Src1Sel.REG, Src2Sel.IMM, LSUOp.NOP,   LSUWidth.WORD, LSUsign.UNSIGNED, BRUOp.NOP,  ImmType.I_TYPE, SpecialInstr.NONE, ZicsrOp.NOP), // SRAI
+  )
 
-    // RV32I 基础整数指令 - I-Type (opcode: 0010011)
-    "b000000000000_000_00000_0010011".U -> DecodeEntry(ALUOp.ADD, Src1Sel.REG, Src2Sel.IMM, LSUOp.NOP, LSUWidth.WORD, LSUsign.UNSIGNED, BRUOp.NOP, ImmType.I_TYPE, SpecialInstr.NONE, ZicsrOp.NOP, true.B),  // ADDI
-    "b000000000000_010_00000_0010011".U -> DecodeEntry(ALUOp.SLT, Src1Sel.REG, Src2Sel.IMM, LSUOp.NOP, LSUWidth.WORD, LSUsign.UNSIGNED, BRUOp.NOP, ImmType.I_TYPE, SpecialInstr.NONE, ZicsrOp.NOP, true.B),  // SLTI
-    "b000000000000_011_00000_0010011".U -> DecodeEntry(ALUOp.SLTU, Src1Sel.REG, Src2Sel.IMM, LSUOp.NOP, LSUWidth.WORD, LSUsign.UNSIGNED, BRUOp.NOP, ImmType.I_TYPE, SpecialInstr.NONE, ZicsrOp.NOP, true.B), // SLTIU
-    "b000000000000_100_00000_0010011".U -> DecodeEntry(ALUOp.XOR, Src1Sel.REG, Src2Sel.IMM, LSUOp.NOP, LSUWidth.WORD, LSUsign.UNSIGNED, BRUOp.NOP, ImmType.I_TYPE, SpecialInstr.NONE, ZicsrOp.NOP, true.B),  // XORI
-    "b000000000000_110_00000_0010011".U -> DecodeEntry(ALUOp.OR, Src1Sel.REG, Src2Sel.IMM, LSUOp.NOP, LSUWidth.WORD, LSUsign.UNSIGNED, BRUOp.NOP, ImmType.I_TYPE, SpecialInstr.NONE, ZicsrOp.NOP, true.B),  // ORI
-    "b000000000000_111_00000_0010011".U -> DecodeEntry(ALUOp.AND, Src1Sel.REG, Src2Sel.IMM, LSUOp.NOP, LSUWidth.WORD, LSUsign.UNSIGNED, BRUOp.NOP, ImmType.I_TYPE, SpecialInstr.NONE, ZicsrOp.NOP, true.B),  // ANDI
-    "b0000000_00000_001_00000_0010011".U -> DecodeEntry(ALUOp.SLL, Src1Sel.REG, Src2Sel.IMM, LSUOp.NOP, LSUWidth.WORD, LSUsign.UNSIGNED, BRUOp.NOP, ImmType.I_TYPE, SpecialInstr.NONE, ZicsrOp.NOP, true.B),  // SLLI
-    "b0000000_00000_101_00000_0010011".U -> DecodeEntry(ALUOp.SRL, Src1Sel.REG, Src2Sel.IMM, LSUOp.NOP, LSUWidth.WORD, LSUsign.UNSIGNED, BRUOp.NOP, ImmType.I_TYPE, SpecialInstr.NONE, ZicsrOp.NOP, true.B),  // SRLI
-    "b0100000_00000_101_00000_0010011".U -> DecodeEntry(ALUOp.SRA, Src1Sel.REG, Src2Sel.IMM, LSUOp.NOP, LSUWidth.WORD, LSUsign.UNSIGNED, BRUOp.NOP, ImmType.I_TYPE, SpecialInstr.NONE, ZicsrOp.NOP, true.B),  // SRAI
+  // RV32I 基础整数运算 - U-Type (opcode: 0110111, 0010111)
+  private val rv32i_utype = Seq(
+    BitPat("b?????????????_?????_0110111")            -> D(ALUOp.ADD,  Src1Sel.ZERO,Src2Sel.IMM, LSUOp.NOP,   LSUWidth.WORD, LSUsign.UNSIGNED, BRUOp.NOP,  ImmType.U_TYPE, SpecialInstr.NONE, ZicsrOp.NOP), // LUI
+    BitPat("b?????????????_?????_0010111")            -> D(ALUOp.ADD,  Src1Sel.PC,  Src2Sel.IMM, LSUOp.NOP,   LSUWidth.WORD, LSUsign.UNSIGNED, BRUOp.NOP,  ImmType.U_TYPE, SpecialInstr.NONE, ZicsrOp.NOP), // AUIPC
+  )
 
-    // 大立即数与 PC 相关指令 (opcode: 0110111, 0010111)
-    "b000000000000_00000_0110111".U -> DecodeEntry(ALUOp.ADD, Src1Sel.ZERO, Src2Sel.IMM, LSUOp.NOP, LSUWidth.WORD, LSUsign.UNSIGNED, BRUOp.NOP, ImmType.U_TYPE, SpecialInstr.NONE, ZicsrOp.NOP, true.B),  // LUI
-    "b000000000000_00000_0010111".U -> DecodeEntry(ALUOp.ADD, Src1Sel.PC, Src2Sel.IMM, LSUOp.NOP, LSUWidth.WORD, LSUsign.UNSIGNED, BRUOp.NOP, ImmType.U_TYPE, SpecialInstr.NONE, ZicsrOp.NOP, true.B),  // AUIPC
+  // RV32I 访存指令 - Load (opcode: 0000011)
+  private val rv32i_load = Seq(
+    BitPat("b?????????????_000_?????_0000011")        -> D(ALUOp.ADD,  Src1Sel.REG, Src2Sel.IMM, LSUOp.LOAD,  LSUWidth.BYTE, LSUsign.SIGNED,   BRUOp.NOP,  ImmType.I_TYPE, SpecialInstr.NONE, ZicsrOp.NOP), // LB
+    BitPat("b?????????????_001_?????_0000011")        -> D(ALUOp.ADD,  Src1Sel.REG, Src2Sel.IMM, LSUOp.LOAD,  LSUWidth.HALF, LSUsign.SIGNED,   BRUOp.NOP,  ImmType.I_TYPE, SpecialInstr.NONE, ZicsrOp.NOP), // LH
+    BitPat("b?????????????_010_?????_0000011")        -> D(ALUOp.ADD,  Src1Sel.REG, Src2Sel.IMM, LSUOp.LOAD,  LSUWidth.WORD, LSUsign.SIGNED,   BRUOp.NOP,  ImmType.I_TYPE, SpecialInstr.NONE, ZicsrOp.NOP), // LW
+    BitPat("b?????????????_100_?????_0000011")        -> D(ALUOp.ADD,  Src1Sel.REG, Src2Sel.IMM, LSUOp.LOAD,  LSUWidth.BYTE, LSUsign.UNSIGNED, BRUOp.NOP,  ImmType.I_TYPE, SpecialInstr.NONE, ZicsrOp.NOP), // LBU
+    BitPat("b?????????????_101_?????_0000011")        -> D(ALUOp.ADD,  Src1Sel.REG, Src2Sel.IMM, LSUOp.LOAD,  LSUWidth.HALF, LSUsign.UNSIGNED, BRUOp.NOP,  ImmType.I_TYPE, SpecialInstr.NONE, ZicsrOp.NOP), // LHU
+  )
 
-    // 控制流指令 (opcode: 1100011, 1101111, 1100111)
-    "b000000000000_00000_1101111".U -> DecodeEntry(ALUOp.NOP, Src1Sel.ZERO, Src2Sel.FOUR, LSUOp.NOP, LSUWidth.WORD, LSUsign.UNSIGNED, BRUOp.JAL, ImmType.J_TYPE, SpecialInstr.BRANCH, ZicsrOp.NOP, true.B),  // JAL
-    "b000000000000_000_00000_1100111".U -> DecodeEntry(ALUOp.NOP, Src1Sel.ZERO, Src2Sel.FOUR, LSUOp.NOP, LSUWidth.WORD, LSUsign.UNSIGNED, BRUOp.JALR, ImmType.I_TYPE, SpecialInstr.BRANCH, ZicsrOp.NOP, true.B), // JALR
-    "b000000000000_000_00000_1100011".U -> DecodeEntry(ALUOp.NOP, Src1Sel.ZERO, Src2Sel.FOUR, LSUOp.NOP, LSUWidth.WORD, LSUsign.UNSIGNED, BRUOp.BEQ, ImmType.B_TYPE, SpecialInstr.BRANCH, ZicsrOp.NOP, true.B),  // BEQ
-    "b000000000000_001_00000_1100011".U -> DecodeEntry(ALUOp.NOP, Src1Sel.ZERO, Src2Sel.FOUR, LSUOp.NOP, LSUWidth.WORD, LSUsign.UNSIGNED, BRUOp.BNE, ImmType.B_TYPE, SpecialInstr.BRANCH, ZicsrOp.NOP, true.B),  // BNE
-    "b000000000000_100_00000_1100011".U -> DecodeEntry(ALUOp.NOP, Src1Sel.ZERO, Src2Sel.FOUR, LSUOp.NOP, LSUWidth.WORD, LSUsign.UNSIGNED, BRUOp.BLT, ImmType.B_TYPE, SpecialInstr.BRANCH, ZicsrOp.NOP, true.B),  // BLT
-    "b000000000000_101_00000_1100011".U -> DecodeEntry(ALUOp.NOP, Src1Sel.ZERO, Src2Sel.FOUR, LSUOp.NOP, LSUWidth.WORD, LSUsign.UNSIGNED, BRUOp.BGE, ImmType.B_TYPE, SpecialInstr.BRANCH, ZicsrOp.NOP, true.B),  // BGE
-    "b000000000000_110_00000_1100011".U -> DecodeEntry(ALUOp.NOP, Src1Sel.ZERO, Src2Sel.FOUR, LSUOp.NOP, LSUWidth.WORD, LSUsign.UNSIGNED, BRUOp.BLTU, ImmType.B_TYPE, SpecialInstr.BRANCH, ZicsrOp.NOP, true.B), // BLTU
-    "b000000000000_111_00000_1100011".U -> DecodeEntry(ALUOp.NOP, Src1Sel.ZERO, Src2Sel.FOUR, LSUOp.NOP, LSUWidth.WORD, LSUsign.UNSIGNED, BRUOp.BGEU, ImmType.B_TYPE, SpecialInstr.BRANCH, ZicsrOp.NOP, true.B), // BGEU
+  // RV32I 访存指令 - Store (opcode: 0100011)
+  private val rv32i_store = Seq(
+    BitPat("b?????????????_000_?????_0100011")        -> D(ALUOp.ADD,  Src1Sel.REG, Src2Sel.IMM, LSUOp.STORE, LSUWidth.BYTE, LSUsign.UNSIGNED, BRUOp.NOP,  ImmType.S_TYPE, SpecialInstr.STORE,ZicsrOp.NOP), // SB
+    BitPat("b?????????????_001_?????_0100011")        -> D(ALUOp.ADD,  Src1Sel.REG, Src2Sel.IMM, LSUOp.STORE, LSUWidth.HALF, LSUsign.UNSIGNED, BRUOp.NOP,  ImmType.S_TYPE, SpecialInstr.STORE,ZicsrOp.NOP), // SH
+    BitPat("b?????????????_010_?????_0100011")        -> D(ALUOp.ADD,  Src1Sel.REG, Src2Sel.IMM, LSUOp.STORE, LSUWidth.WORD, LSUsign.UNSIGNED, BRUOp.NOP,  ImmType.S_TYPE, SpecialInstr.STORE,ZicsrOp.NOP), // SW
+  )
 
-    // 访存指令 (opcode: 0000011, 0100011)
-    "b000000000000_000_00000_0000011".U -> DecodeEntry(ALUOp.ADD, Src1Sel.REG, Src2Sel.IMM, LSUOp.LOAD, LSUWidth.BYTE, LSUsign.SIGNED, BRUOp.NOP, ImmType.I_TYPE, SpecialInstr.NONE, ZicsrOp.NOP, true.B),   // LB
-    "b000000000000_001_00000_0000011".U -> DecodeEntry(ALUOp.ADD, Src1Sel.REG, Src2Sel.IMM, LSUOp.LOAD, LSUWidth.HALF, LSUsign.SIGNED, BRUOp.NOP, ImmType.I_TYPE, SpecialInstr.NONE, ZicsrOp.NOP, true.B),   // LH
-    "b000000000000_010_00000_0000011".U -> DecodeEntry(ALUOp.ADD, Src1Sel.REG, Src2Sel.IMM, LSUOp.LOAD, LSUWidth.WORD, LSUsign.SIGNED, BRUOp.NOP, ImmType.I_TYPE, SpecialInstr.NONE, ZicsrOp.NOP, true.B),   // LW
-    "b000000000000_100_00000_0000011".U -> DecodeEntry(ALUOp.ADD, Src1Sel.REG, Src2Sel.IMM, LSUOp.LOAD, LSUWidth.BYTE, LSUsign.UNSIGNED, BRUOp.NOP, ImmType.I_TYPE, SpecialInstr.NONE, ZicsrOp.NOP, true.B),  // LBU
-    "b000000000000_101_00000_0000011".U -> DecodeEntry(ALUOp.ADD, Src1Sel.REG, Src2Sel.IMM, LSUOp.LOAD, LSUWidth.HALF, LSUsign.UNSIGNED, BRUOp.NOP, ImmType.I_TYPE, SpecialInstr.NONE, ZicsrOp.NOP, true.B),  // LHU
-    "b000000000000_000_00000_0100011".U -> DecodeEntry(ALUOp.ADD, Src1Sel.REG, Src2Sel.IMM, LSUOp.STORE, LSUWidth.BYTE, LSUsign.UNSIGNED, BRUOp.NOP, ImmType.S_TYPE, SpecialInstr.STORE, ZicsrOp.NOP, true.B),  // SB
-    "b000000000000_001_00000_0100011".U -> DecodeEntry(ALUOp.ADD, Src1Sel.REG, Src2Sel.IMM, LSUOp.STORE, LSUWidth.HALF, LSUsign.UNSIGNED, BRUOp.NOP, ImmType.S_TYPE, SpecialInstr.STORE, ZicsrOp.NOP, true.B),  // SH
-    "b000000000000_010_00000_0100011".U -> DecodeEntry(ALUOp.ADD, Src1Sel.REG, Src2Sel.IMM, LSUOp.STORE, LSUWidth.WORD, LSUsign.UNSIGNED, BRUOp.NOP, ImmType.S_TYPE, SpecialInstr.STORE, ZicsrOp.NOP, true.B),  // SW
-    "b000000000000_000_00000_0001111".U -> DecodeEntry(ALUOp.NOP, Src1Sel.ZERO, Src2Sel.FOUR, LSUOp.NOP, LSUWidth.WORD, LSUsign.UNSIGNED, BRUOp.NOP, ImmType.Z_TYPE, SpecialInstr.FENCE, ZicsrOp.NOP, true.B),  // FENCE
+  // RV32I 分支与跳转 - B-Type (opcode: 1100011)
+  private val rv32i_btype = Seq(
+    BitPat("b?????????????_000_?????_1100011")        -> D(ALUOp.NOP,  Src1Sel.ZERO,Src2Sel.FOUR,LSUOp.NOP,   LSUWidth.WORD, LSUsign.UNSIGNED, BRUOp.BEQ,  ImmType.B_TYPE, SpecialInstr.BRANCH,ZicsrOp.NOP), // BEQ
+    BitPat("b?????????????_001_?????_1100011")        -> D(ALUOp.NOP,  Src1Sel.ZERO,Src2Sel.FOUR,LSUOp.NOP,   LSUWidth.WORD, LSUsign.UNSIGNED, BRUOp.BNE,  ImmType.B_TYPE, SpecialInstr.BRANCH,ZicsrOp.NOP), // BNE
+    BitPat("b?????????????_100_?????_1100011")        -> D(ALUOp.NOP,  Src1Sel.ZERO,Src2Sel.FOUR,LSUOp.NOP,   LSUWidth.WORD, LSUsign.UNSIGNED, BRUOp.BLT,  ImmType.B_TYPE, SpecialInstr.BRANCH,ZicsrOp.NOP), // BLT
+    BitPat("b?????????????_101_?????_1100011")        -> D(ALUOp.NOP,  Src1Sel.ZERO,Src2Sel.FOUR,LSUOp.NOP,   LSUWidth.WORD, LSUsign.UNSIGNED, BRUOp.BGE,  ImmType.B_TYPE, SpecialInstr.BRANCH,ZicsrOp.NOP), // BGE
+    BitPat("b?????????????_110_?????_1100011")        -> D(ALUOp.NOP,  Src1Sel.ZERO,Src2Sel.FOUR,LSUOp.NOP,   LSUWidth.WORD, LSUsign.UNSIGNED, BRUOp.BLTU, ImmType.B_TYPE, SpecialInstr.BRANCH,ZicsrOp.NOP), // BLTU
+    BitPat("b?????????????_111_?????_1100011")        -> D(ALUOp.NOP,  Src1Sel.ZERO,Src2Sel.FOUR,LSUOp.NOP,   LSUWidth.WORD, LSUsign.UNSIGNED, BRUOp.BGEU, ImmType.B_TYPE, SpecialInstr.BRANCH,ZicsrOp.NOP), // BGEU
+  )
 
-    // Zifencei 扩展指令
-    "b000000000000_001_00000_0001111".U -> DecodeEntry(ALUOp.NOP, Src1Sel.ZERO, Src2Sel.FOUR, LSUOp.NOP, LSUWidth.WORD, LSUsign.UNSIGNED, BRUOp.NOP, ImmType.Z_TYPE, SpecialInstr.FENCEI, ZicsrOp.NOP, true.B), // FENCE.I
+  // RV32I 分支与跳转 - J-Type (opcode: 1101111)
+  private val rv32i_jtype = Seq(
+    BitPat("b?????????????_?????_1101111")            -> D(ALUOp.NOP,  Src1Sel.ZERO,Src2Sel.FOUR,LSUOp.NOP,   LSUWidth.WORD, LSUsign.UNSIGNED, BRUOp.JAL, ImmType.J_TYPE, SpecialInstr.BRANCH,ZicsrOp.NOP), // JAL
+  )
 
-    // Zicsr 扩展指令 (opcode: 1110011)
-    "b000000000000_001_00000_1110011".U -> DecodeEntry(ALUOp.NOP, Src1Sel.REG, Src2Sel.FOUR, LSUOp.NOP, LSUWidth.WORD, LSUsign.UNSIGNED, BRUOp.NOP, ImmType.I_TYPE, SpecialInstr.CSR, ZicsrOp.RW, true.B),   // CSRRW
-    "b000000000000_010_00000_1110011".U -> DecodeEntry(ALUOp.NOP, Src1Sel.REG, Src2Sel.FOUR, LSUOp.NOP, LSUWidth.WORD, LSUsign.UNSIGNED, BRUOp.NOP, ImmType.I_TYPE, SpecialInstr.CSR, ZicsrOp.RS, true.B),   // CSRRS
-    "b000000000000_011_00000_1110011".U -> DecodeEntry(ALUOp.NOP, Src1Sel.REG, Src2Sel.FOUR, LSUOp.NOP, LSUWidth.WORD, LSUsign.UNSIGNED, BRUOp.NOP, ImmType.I_TYPE, SpecialInstr.CSR, ZicsrOp.RC, true.B),   // CSRRC
-    "b000000000000_101_00000_1110011".U -> DecodeEntry(ALUOp.NOP, Src1Sel.IMM, Src2Sel.FOUR, LSUOp.NOP, LSUWidth.WORD, LSUsign.UNSIGNED, BRUOp.NOP, ImmType.Z_TYPE, SpecialInstr.CSR, ZicsrOp.RW, true.B),   // CSRRWI
-    "b000000000000_110_00000_1110011".U -> DecodeEntry(ALUOp.NOP, Src1Sel.IMM, Src2Sel.FOUR, LSUOp.NOP, LSUWidth.WORD, LSUsign.UNSIGNED, BRUOp.NOP, ImmType.Z_TYPE, SpecialInstr.CSR, ZicsrOp.RS, true.B),   // CSRRSI
-    "b000000000000_111_00000_1110011".U -> DecodeEntry(ALUOp.NOP, Src1Sel.IMM, Src2Sel.FOUR, LSUOp.NOP, LSUWidth.WORD, LSUsign.UNSIGNED, BRUOp.NOP, ImmType.Z_TYPE, SpecialInstr.CSR, ZicsrOp.RC, true.B),   // CSRRCI
+  // RV32I 分支与跳转 - JALR (opcode: 1100111)
+  private val rv32i_jalr = Seq(
+    BitPat("b?????????????_000_?????_1100111")        -> D(ALUOp.NOP,  Src1Sel.ZERO,Src2Sel.FOUR,LSUOp.NOP,   LSUWidth.WORD, LSUsign.UNSIGNED, BRUOp.JALR, ImmType.I_TYPE, SpecialInstr.BRANCH,ZicsrOp.NOP), // JALR
+  )
 
-    // 特权指令 (opcode: 1110011)
-    "b000000000000_000_00000_1110011".U -> DecodeEntry(ALUOp.NOP, Src1Sel.ZERO, Src2Sel.FOUR, LSUOp.NOP, LSUWidth.WORD, LSUsign.UNSIGNED, BRUOp.NOP, ImmType.Z_TYPE, SpecialInstr.ECALL, ZicsrOp.NOP, true.B),  // ECALL
-    "b000000000001_000_00000_1110011".U -> DecodeEntry(ALUOp.NOP, Src1Sel.ZERO, Src2Sel.FOUR, LSUOp.NOP, LSUWidth.WORD, LSUsign.UNSIGNED, BRUOp.NOP, ImmType.Z_TYPE, SpecialInstr.EBREAK, ZicsrOp.NOP, true.B), // EBREAK
-    "b001100000010_000_00000_1110011".U -> DecodeEntry(ALUOp.NOP, Src1Sel.ZERO, Src2Sel.FOUR, LSUOp.NOP, LSUWidth.WORD, LSUsign.UNSIGNED, BRUOp.NOP, ImmType.Z_TYPE, SpecialInstr.MRET, ZicsrOp.NOP, true.B),  // MRET
-    "b000100000010_000_00000_1110011".U -> DecodeEntry(ALUOp.NOP, Src1Sel.ZERO, Src2Sel.FOUR, LSUOp.NOP, LSUWidth.WORD, LSUsign.UNSIGNED, BRUOp.NOP, ImmType.Z_TYPE, SpecialInstr.SRET, ZicsrOp.NOP, true.B),  // SRET
-    "b000100000101_000_00000_1110011".U -> DecodeEntry(ALUOp.NOP, Src1Sel.ZERO, Src2Sel.FOUR, LSUOp.NOP, LSUWidth.WORD, LSUsign.UNSIGNED, BRUOp.NOP, ImmType.Z_TYPE, SpecialInstr.WFI, ZicsrOp.NOP, true.B),   // WFI
-    "b0001001_00000_000_00000_1110011".U -> DecodeEntry(ALUOp.NOP, Src1Sel.ZERO, Src2Sel.FOUR, LSUOp.NOP, LSUWidth.WORD, LSUsign.UNSIGNED, BRUOp.NOP, ImmType.Z_TYPE, SpecialInstr.SFENCE, ZicsrOp.NOP, true.B)   // SFENCE.VMA
-  ))
+  // RV32I FENCE 指令 (opcode: 0001111)
+  private val rv32i_fence = Seq(
+    BitPat("b0000????????_00000_000_00000_0001111")   -> D(ALUOp.NOP,  Src1Sel.ZERO,Src2Sel.FOUR,LSUOp.NOP,   LSUWidth.WORD, LSUsign.UNSIGNED, BRUOp.NOP,  ImmType.Z_TYPE, SpecialInstr.FENCE, ZicsrOp.NOP), // FENCE
+  )
 
-  // 使用查找表进行指令解码
-  val decodeEntry = decodeTable(inst, defaultEntry)
+  // Zifencei 扩展指令 (opcode: 0001111)
+  private val rv32i_zifencei = Seq(
+    BitPat("b000000000000_00000_001_00000_0001111")   -> D(ALUOp.NOP,  Src1Sel.ZERO,Src2Sel.FOUR,LSUOp.NOP,   LSUWidth.WORD, LSUsign.UNSIGNED, BRUOp.NOP,  ImmType.Z_TYPE, SpecialInstr.FENCEI,ZicsrOp.NOP), // FENCE.I
+  )
 
-  // 从解码表项中提取各个信号
-  aluOp := decodeEntry.aluOp
-  op1Src := decodeEntry.op1Src
-  op2Src := decodeEntry.op2Src
-  lsuOp := decodeEntry.lsuOp
-  lsuWidth := decodeEntry.lsuWidth
-  lsuSign := decodeEntry.lsuSign
-  bruOp := decodeEntry.bruOp
-  immType := decodeEntry.immType
+  // Zicsr 扩展指令 (opcode: 1110011)
+  private val rv32i_zicsr = Seq(
+    BitPat("b?????????????_001_?????_1110011")        -> D(ALUOp.NOP,  Src1Sel.REG, Src2Sel.FOUR,LSUOp.NOP,   LSUWidth.WORD, LSUsign.UNSIGNED, BRUOp.NOP,  ImmType.I_TYPE, SpecialInstr.CSR,   ZicsrOp.RW),  // CSRRW
+    BitPat("b?????????????_010_?????_1110011")        -> D(ALUOp.NOP,  Src1Sel.REG, Src2Sel.FOUR,LSUOp.NOP,   LSUWidth.WORD, LSUsign.UNSIGNED, BRUOp.NOP,  ImmType.I_TYPE, SpecialInstr.CSR,   ZicsrOp.RS),  // CSRRS
+    BitPat("b?????????????_011_?????_1110011")        -> D(ALUOp.NOP,  Src1Sel.REG, Src2Sel.FOUR,LSUOp.NOP,   LSUWidth.WORD, LSUsign.UNSIGNED, BRUOp.NOP,  ImmType.I_TYPE, SpecialInstr.CSR,   ZicsrOp.RC),  // CSRRC
+    BitPat("b?????????????_101_?????_1110011")        -> D(ALUOp.NOP,  Src1Sel.IMM, Src2Sel.FOUR,LSUOp.NOP, LSUWidth.WORD, LSUsign.UNSIGNED, BRUOp.NOP, ImmType.Z_TYPE, SpecialInstr.CSR,   ZicsrOp.RW),  // CSRRWI
+    BitPat("b?????????????_110_?????_1110011")        -> D(ALUOp.NOP,  Src1Sel.IMM, Src2Sel.FOUR,LSUOp.NOP,   LSUWidth.WORD, LSUsign.UNSIGNED, BRUOp.NOP,  ImmType.Z_TYPE, SpecialInstr.CSR,   ZicsrOp.RS),  // CSRRSI
+    BitPat("b?????????????_111_?????_1110011")        -> D(ALUOp.NOP,  Src1Sel.IMM, Src2Sel.FOUR,LSUOp.NOP,   LSUWidth.WORD, LSUsign.UNSIGNED, BRUOp.NOP,  ImmType.Z_TYPE, SpecialInstr.CSR,   ZicsrOp.RC),  // CSRRCI
+  )
+
+  // 特权指令 (opcode: 1110011)
+  private val rv32i_priv = Seq(
+    BitPat("b000000000000_00000_000_00000_1110011")   -> D(ALUOp.NOP,  Src1Sel.ZERO,Src2Sel.FOUR,LSUOp.NOP,   LSUWidth.WORD, LSUsign.UNSIGNED, BRUOp.NOP,  ImmType.Z_TYPE, SpecialInstr.ECALL, ZicsrOp.NOP), // ECALL
+    BitPat("b000000000001_00000_000_00000_1110011")   -> D(ALUOp.NOP,  Src1Sel.ZERO,Src2Sel.FOUR,LSUOp.NOP,   LSUWidth.WORD, LSUsign.UNSIGNED, BRUOp.NOP,  ImmType.Z_TYPE, SpecialInstr.EBREAK,ZicsrOp.NOP), // EBREAK
+    BitPat("b001100000010_00000_000_00000_1110011")   -> D(ALUOp.NOP,  Src1Sel.ZERO,Src2Sel.FOUR,LSUOp.NOP,   LSUWidth.WORD, LSUsign.UNSIGNED, BRUOp.NOP,  ImmType.Z_TYPE, SpecialInstr.MRET,  ZicsrOp.NOP), // MRET
+    BitPat("b000100000010_00000_000_00000_1110011")   -> D(ALUOp.NOP,  Src1Sel.ZERO,Src2Sel.FOUR,LSUOp.NOP,   LSUWidth.WORD, LSUsign.UNSIGNED, BRUOp.NOP,  ImmType.Z_TYPE, SpecialInstr.SRET,  ZicsrOp.NOP), // SRET
+    BitPat("b000100000101_00000_000_00000_1110011")   -> D(ALUOp.NOP,  Src1Sel.ZERO,Src2Sel.FOUR,LSUOp.NOP,   LSUWidth.WORD, LSUsign.UNSIGNED, BRUOp.NOP,  ImmType.Z_TYPE, SpecialInstr.WFI,   ZicsrOp.NOP), // WFI
+    BitPat("b0001001?????_?????_000_00000_1110011")   -> D(ALUOp.NOP,  Src1Sel.ZERO,Src2Sel.FOUR,LSUOp.NOP,   LSUWidth.WORD, LSUsign.UNSIGNED, BRUOp.NOP,  ImmType.Z_TYPE, SpecialInstr.SFENCE,ZicsrOp.NOP), // SFENCE.VMA
+  )
+
+  // 全量表合并
+  val table = rv32i_rtype ++ rv32i_itype ++ rv32i_utype ++
+              rv32i_load ++ rv32i_store ++ rv32i_fence ++
+              rv32i_btype ++ rv32i_jtype ++ rv32i_jalr ++
+              rv32i_zifencei ++ rv32i_zicsr ++ rv32i_priv
+}
+```
+
+##### 2.2.2 利用查找表完成解码
+
+在 `Decoder.scala` 模块内，使用 `MuxLookup` 根据指令的 bitpattern 和 `Instructions.scala` 中定义查找表进行指令解码，并将结果分配到各个控制信号：
+
+```scala
+// 将 table 转换为 MuxCase 接受的格式
+  val decodeEntry = MuxCase(Instructions.defaultEntry, Instructions.table.map { 
+  case (pat, entry) => (io.inst === pat) -> entry 
+  })
+
+  // 将查找到的解码信息分配到各个控制信号
+  aluOp        := decodeEntry.aluOp
+  op1Src       := decodeEntry.op1Src
+  op2Src       := decodeEntry.op2Src
+  lsuOp        := decodeEntry.lsuOp
+  lsuWidth     := decodeEntry.lsuWidth
+  lsuSign      := decodeEntry.lsuSign
+  bruOp        := decodeEntry.bruOp
+  immType      := decodeEntry.immType
   specialInstr := decodeEntry.specialInstr
-  zicsrOp := decodeEntry.zicsrOp
+  zicsrOp      := decodeEntry.zicsrOp
 
-  isCsr := (specialInstr === SpecialInstr.CSR)
-  isEcall := (specialInstr === SpecialInstr.ECALL)
-  isEbreak := (specialInstr === SpecialInstr.EBREAK)
+  // 特殊指令标志
+  isCsr    := specialInstr === SpecialInstr.CSR
+  isEcall  := specialInstr === SpecialInstr.ECALL
+  isEbreak := specialInstr === SpecialInstr.EBREAK
 ```
 
 ##### 2.2.2 立即数生成逻辑
@@ -624,78 +709,8 @@ class Decoder extends Module with CPUConfig {
     isLegal = false.B  // 默认为非法指令
   )
 
-  // 定义指令解码查找表
-  val decodeTable = VecInit(Seq(
-    // RV32I 基础整数指令 - R-Type (opcode: 0110011)
-    "b0000000_00000_000_00000_0110011".U -> DecodeEntry(ALUOp.ADD, Src1Sel.REG, Src2Sel.REG, LSUOp.NOP, LSUWidth.WORD, LSUsign.UNSIGNED, BRUOp.NOP, ImmType.R_TYPE, SpecialInstr.NONE, ZicsrOp.NOP, true.B),  // ADD
-    "b0100000_00000_000_00000_0110011".U -> DecodeEntry(ALUOp.SUB, Src1Sel.REG, Src2Sel.REG, LSUOp.NOP, LSUWidth.WORD, LSUsign.UNSIGNED, BRUOp.NOP, ImmType.R_TYPE, SpecialInstr.NONE, ZicsrOp.NOP, true.B),  // SUB
-    "b0000000_00000_001_00000_0110011".U -> DecodeEntry(ALUOp.SLL, Src1Sel.REG, Src2Sel.REG, LSUOp.NOP, LSUWidth.WORD, LSUsign.UNSIGNED, BRUOp.NOP, ImmType.R_TYPE, SpecialInstr.NONE, ZicsrOp.NOP, true.B),  // SLL
-    "b0000000_00000_010_00000_0110011".U -> DecodeEntry(ALUOp.SLT, Src1Sel.REG, Src2Sel.REG, LSUOp.NOP, LSUWidth.WORD, LSUsign.UNSIGNED, BRUOp.NOP, ImmType.R_TYPE, SpecialInstr.NONE, ZicsrOp.NOP, true.B),  // SLT
-    "b0000000_00000_011_00000_0110011".U -> DecodeEntry(ALUOp.SLTU, Src1Sel.REG, Src2Sel.REG, LSUOp.NOP, LSUWidth.WORD, LSUsign.UNSIGNED, BRUOp.NOP, ImmType.R_TYPE, SpecialInstr.NONE, ZicsrOp.NOP, true.B), // SLTU
-    "b0000000_00000_100_00000_0110011".U -> DecodeEntry(ALUOp.XOR, Src1Sel.REG, Src2Sel.REG, LSUOp.NOP, LSUWidth.WORD, LSUsign.UNSIGNED, BRUOp.NOP, ImmType.R_TYPE, SpecialInstr.NONE, ZicsrOp.NOP, true.B),  // XOR
-    "b0000000_00000_101_00000_0110011".U -> DecodeEntry(ALUOp.SRL, Src1Sel.REG, Src2Sel.REG, LSUOp.NOP, LSUWidth.WORD, LSUsign.UNSIGNED, BRUOp.NOP, ImmType.R_TYPE, SpecialInstr.NONE, ZicsrOp.NOP, true.B),  // SRL
-    "b0100000_00000_101_00000_0110011".U -> DecodeEntry(ALUOp.SRA, Src1Sel.REG, Src2Sel.REG, LSUOp.NOP, LSUWidth.WORD, LSUsign.UNSIGNED, BRUOp.NOP, ImmType.R_TYPE, SpecialInstr.NONE, ZicsrOp.NOP, true.B),  // SRA
-    "b0000000_00000_110_00000_0110011".U -> DecodeEntry(ALUOp.OR, Src1Sel.REG, Src2Sel.REG, LSUOp.NOP, LSUWidth.WORD, LSUsign.UNSIGNED, BRUOp.NOP, ImmType.R_TYPE, SpecialInstr.NONE, ZicsrOp.NOP, true.B),  // OR
-    "b0000000_00000_111_00000_0110011".U -> DecodeEntry(ALUOp.AND, Src1Sel.REG, Src2Sel.REG, LSUOp.NOP, LSUWidth.WORD, LSUsign.UNSIGNED, BRUOp.NOP, ImmType.R_TYPE, SpecialInstr.NONE, ZicsrOp.NOP, true.B),  // AND
-
-    // RV32I 基础整数指令 - I-Type (opcode: 0010011)
-    "b000000000000_000_00000_0010011".U -> DecodeEntry(ALUOp.ADD, Src1Sel.REG, Src2Sel.IMM, LSUOp.NOP, LSUWidth.WORD, LSUsign.UNSIGNED, BRUOp.NOP, ImmType.I_TYPE, SpecialInstr.NONE, ZicsrOp.NOP, true.B),  // ADDI
-    "b000000000000_010_00000_0010011".U -> DecodeEntry(ALUOp.SLT, Src1Sel.REG, Src2Sel.IMM, LSUOp.NOP, LSUWidth.WORD, LSUsign.UNSIGNED, BRUOp.NOP, ImmType.I_TYPE, SpecialInstr.NONE, ZicsrOp.NOP, true.B),  // SLTI
-    "b000000000000_011_00000_0010011".U -> DecodeEntry(ALUOp.SLTU, Src1Sel.REG, Src2Sel.IMM, LSUOp.NOP, LSUWidth.WORD, LSUsign.UNSIGNED, BRUOp.NOP, ImmType.I_TYPE, SpecialInstr.NONE, ZicsrOp.NOP, true.B), // SLTIU
-    "b000000000000_100_00000_0010011".U -> DecodeEntry(ALUOp.XOR, Src1Sel.REG, Src2Sel.IMM, LSUOp.NOP, LSUWidth.WORD, LSUsign.UNSIGNED, BRUOp.NOP, ImmType.I_TYPE, SpecialInstr.NONE, ZicsrOp.NOP, true.B),  // XORI
-    "b000000000000_110_00000_0010011".U -> DecodeEntry(ALUOp.OR, Src1Sel.REG, Src2Sel.IMM, LSUOp.NOP, LSUWidth.WORD, LSUsign.UNSIGNED, BRUOp.NOP, ImmType.I_TYPE, SpecialInstr.NONE, ZicsrOp.NOP, true.B),  // ORI
-    "b000000000000_111_00000_0010011".U -> DecodeEntry(ALUOp.AND, Src1Sel.REG, Src2Sel.IMM, LSUOp.NOP, LSUWidth.WORD, LSUsign.UNSIGNED, BRUOp.NOP, ImmType.I_TYPE, SpecialInstr.NONE, ZicsrOp.NOP, true.B),  // ANDI
-    "b0000000_00000_001_00000_0010011".U -> DecodeEntry(ALUOp.SLL, Src1Sel.REG, Src2Sel.IMM, LSUOp.NOP, LSUWidth.WORD, LSUsign.UNSIGNED, BRUOp.NOP, ImmType.I_TYPE, SpecialInstr.NONE, ZicsrOp.NOP, true.B),  // SLLI
-    "b0000000_00000_101_00000_0010011".U -> DecodeEntry(ALUOp.SRL, Src1Sel.REG, Src2Sel.IMM, LSUOp.NOP, LSUWidth.WORD, LSUsign.UNSIGNED, BRUOp.NOP, ImmType.I_TYPE, SpecialInstr.NONE, ZicsrOp.NOP, true.B),  // SRLI
-    "b0100000_00000_101_00000_0010011".U -> DecodeEntry(ALUOp.SRA, Src1Sel.REG, Src2Sel.IMM, LSUOp.NOP, LSUWidth.WORD, LSUsign.UNSIGNED, BRUOp.NOP, ImmType.I_TYPE, SpecialInstr.NONE, ZicsrOp.NOP, true.B),  // SRAI
-
-    // 大立即数与 PC 相关指令 (opcode: 0110111, 0010111)
-    "b000000000000_00000_0110111".U -> DecodeEntry(ALUOp.ADD, Src1Sel.ZERO, Src2Sel.IMM, LSUOp.NOP, LSUWidth.WORD, LSUsign.UNSIGNED, BRUOp.NOP, ImmType.U_TYPE, SpecialInstr.NONE, ZicsrOp.NOP, true.B),  // LUI
-    "b000000000000_00000_0010111".U -> DecodeEntry(ALUOp.ADD, Src1Sel.PC, Src2Sel.IMM, LSUOp.NOP, LSUWidth.WORD, LSUsign.UNSIGNED, BRUOp.NOP, ImmType.U_TYPE, SpecialInstr.NONE, ZicsrOp.NOP, true.B),  // AUIPC
-
-    // 控制流指令 (opcode: 1100011, 1101111, 1100111)
-    "b000000000000_00000_1101111".U -> DecodeEntry(ALUOp.NOP, Src1Sel.ZERO, Src2Sel.FOUR, LSUOp.NOP, LSUWidth.WORD, LSUsign.UNSIGNED, BRUOp.JAL, ImmType.J_TYPE, SpecialInstr.BRANCH, ZicsrOp.NOP, true.B),  // JAL
-    "b000000000000_00000_1100111".U -> DecodeEntry(ALUOp.NOP, Src1Sel.ZERO, Src2Sel.FOUR, LSUOp.NOP, LSUWidth.WORD, LSUsign.UNSIGNED, BRUOp.JALR, ImmType.I_TYPE, SpecialInstr.BRANCH, ZicsrOp.NOP, true.B),  // JALR
-    "b000000000000_000_00000_1100011".U -> DecodeEntry(ALUOp.NOP, Src1Sel.ZERO, Src2Sel.FOUR, LSUOp.NOP, LSUWidth.WORD, LSUsign.UNSIGNED, BRUOp.BEQ, ImmType.B_TYPE, SpecialInstr.BRANCH, ZicsrOp.NOP, true.B),  // BEQ
-    "b000000000000_001_00000_1100011".U -> DecodeEntry(ALUOp.NOP, Src1Sel.ZERO, Src2Sel.FOUR, LSUOp.NOP, LSUWidth.WORD, LSUsign.UNSIGNED, BRUOp.BNE, ImmType.B_TYPE, SpecialInstr.BRANCH, ZicsrOp.NOP, true.B),  // BNE
-    "b000000000000_100_00000_1100011".U -> DecodeEntry(ALUOp.NOP, Src1Sel.ZERO, Src2Sel.FOUR, LSUOp.NOP, LSUWidth.WORD, LSUsign.UNSIGNED, BRUOp.BLT, ImmType.B_TYPE, SpecialInstr.BRANCH, ZicsrOp.NOP, true.B),  // BLT
-    "b000000000000_101_00000_1100011".U -> DecodeEntry(ALUOp.NOP, Src1Sel.ZERO, Src2Sel.FOUR, LSUOp.NOP, LSUWidth.WORD, LSUsign.UNSIGNED, BRUOp.BGE, ImmType.B_TYPE, SpecialInstr.BRANCH, ZicsrOp.NOP, true.B),  // BGE
-    "b000000000000_110_00000_1100011".U -> DecodeEntry(ALUOp.NOP, Src1Sel.ZERO, Src2Sel.FOUR, LSUOp.NOP, LSUWidth.WORD, LSUsign.UNSIGNED, BRUOp.BLTU, ImmType.B_TYPE, SpecialInstr.BRANCH, ZicsrOp.NOP, true.B),  // BLTU
-    "b000000000000_111_00000_1100011".U -> DecodeEntry(ALUOp.NOP, Src1Sel.ZERO, Src2Sel.FOUR, LSUOp.NOP, LSUWidth.WORD, LSUsign.UNSIGNED, BRUOp.BGEU, ImmType.B_TYPE, SpecialInstr.BRANCH, ZicsrOp.NOP, true.B),  // BGEU
-
-    // 访存指令 (opcode: 0000011, 0100011)
-    "b000000000000_000_00000_0000011".U -> DecodeEntry(ALUOp.ADD, Src1Sel.REG, Src2Sel.IMM, LSUOp.LOAD, LSUWidth.BYTE, LSUsign.SIGNED, BRUOp.NOP, ImmType.I_TYPE, SpecialInstr.NONE, ZicsrOp.NOP, true.B),   // LB
-    "b000000000000_001_00000_0000011".U -> DecodeEntry(ALUOp.ADD, Src1Sel.REG, Src2Sel.IMM, LSUOp.LOAD, LSUWidth.HALF, LSUsign.SIGNED, BRUOp.NOP, ImmType.I_TYPE, SpecialInstr.NONE, ZicsrOp.NOP, true.B),   // LH
-    "b000000000000_010_00000_0000011".U -> DecodeEntry(ALUOp.ADD, Src1Sel.REG, Src2Sel.IMM, LSUOp.LOAD, LSUWidth.WORD, LSUsign.SIGNED, BRUOp.NOP, ImmType.I_TYPE, SpecialInstr.NONE, ZicsrOp.NOP, true.B),   // LW
-    "b000000000000_100_00000_0000011".U -> DecodeEntry(ALUOp.ADD, Src1Sel.REG, Src2Sel.IMM, LSUOp.LOAD, LSUWidth.BYTE, LSUsign.UNSIGNED, BRUOp.NOP, ImmType.I_TYPE, SpecialInstr.NONE, ZicsrOp.NOP, true.B),  // LBU
-    "b000000000000_101_00000_0000011".U -> DecodeEntry(ALUOp.ADD, Src1Sel.REG, Src2Sel.IMM, LSUOp.LOAD, LSUWidth.HALF, LSUsign.UNSIGNED, BRUOp.NOP, ImmType.I_TYPE, SpecialInstr.NONE, ZicsrOp.NOP, true.B),  // LHU
-    "b000000000000_000_00000_0100011".U -> DecodeEntry(ALUOp.ADD, Src1Sel.REG, Src2Sel.IMM, LSUOp.STORE, LSUWidth.BYTE, LSUsign.UNSIGNED, BRUOp.NOP, ImmType.S_TYPE, SpecialInstr.STORE, ZicsrOp.NOP, true.B),  // SB
-    "b000000000000_001_00000_0100011".U -> DecodeEntry(ALUOp.ADD, Src1Sel.REG, Src2Sel.IMM, LSUOp.STORE, LSUWidth.HALF, LSUsign.UNSIGNED, BRUOp.NOP, ImmType.S_TYPE, SpecialInstr.STORE, ZicsrOp.NOP, true.B),  // SH
-    "b000000000000_010_00000_0100011".U -> DecodeEntry(ALUOp.ADD, Src1Sel.REG, Src2Sel.IMM, LSUOp.STORE, LSUWidth.WORD, LSUsign.UNSIGNED, BRUOp.NOP, ImmType.S_TYPE, SpecialInstr.STORE, ZicsrOp.NOP, true.B),  // SW
-    "b000000000000_000_00000_0001111".U -> DecodeEntry(ALUOp.NOP, Src1Sel.ZERO, Src2Sel.FOUR, LSUOp.NOP, LSUWidth.WORD, LSUsign.UNSIGNED, BRUOp.NOP, ImmType.Z_TYPE, SpecialInstr.FENCE, ZicsrOp.NOP, true.B),  // FENCE
-
-    // Zifencei 扩展指令
-    "b000000000000_001_00000_0001111".U -> DecodeEntry(ALUOp.NOP, Src1Sel.ZERO, Src2Sel.FOUR, LSUOp.NOP, LSUWidth.WORD, LSUsign.UNSIGNED, BRUOp.NOP, ImmType.Z_TYPE, SpecialInstr.FENCEI, ZicsrOp.NOP, true.B), // FENCE.I
-
-    // Zicsr 扩展指令 (opcode: 1110011)
-    "b000000000000_001_00000_1110011".U -> DecodeEntry(ALUOp.NOP, Src1Sel.REG, Src2Sel.FOUR, LSUOp.NOP, LSUWidth.WORD, LSUsign.UNSIGNED, BRUOp.NOP, ImmType.I_TYPE, SpecialInstr.CSR, ZicsrOp.RW, true.B),   // CSRRW
-    "b000000000000_010_00000_1110011".U -> DecodeEntry(ALUOp.NOP, Src1Sel.REG, Src2Sel.FOUR, LSUOp.NOP, LSUWidth.WORD, LSUsign.UNSIGNED, BRUOp.NOP, ImmType.I_TYPE, SpecialInstr.CSR, ZicsrOp.RS, true.B),   // CSRRS
-    "b000000000000_011_00000_1110011".U -> DecodeEntry(ALUOp.NOP, Src1Sel.REG, Src2Sel.FOUR, LSUOp.NOP, LSUWidth.WORD, LSUsign.UNSIGNED, BRUOp.NOP, ImmType.I_TYPE, SpecialInstr.CSR, ZicsrOp.RC, true.B),   // CSRRC
-    "b000000000000_101_00000_1110011".U -> DecodeEntry(ALUOp.NOP, Src1Sel.IMM, Src2Sel.FOUR, LSUOp.NOP, LSUWidth.WORD, LSUsign.UNSIGNED, BRUOp.NOP, ImmType.Z_TYPE, SpecialInstr.CSR, ZicsrOp.RW, true.B),   // CSRRWI
-    "b000000000000_110_00000_1110011".U -> DecodeEntry(ALUOp.NOP, Src1Sel.IMM, Src2Sel.FOUR, LSUOp.NOP, LSUWidth.WORD, LSUsign.UNSIGNED, BRUOp.NOP, ImmType.Z_TYPE, SpecialInstr.CSR, ZicsrOp.RS, true.B),   // CSRRSI
-    "b000000000000_111_00000_1110011".U -> DecodeEntry(ALUOp.NOP, Src1Sel.IMM, Src2Sel.FOUR, LSUOp.NOP, LSUWidth.WORD, LSUsign.UNSIGNED, BRUOp.NOP, ImmType.Z_TYPE, SpecialInstr.CSR, ZicsrOp.RC, true.B),   // CSRRCI
-
-    // 特权指令 (opcode: 1110011)
-    "b000000000000_000_00000_1110011".U -> DecodeEntry(ALUOp.NOP, Src1Sel.ZERO, Src2Sel.FOUR, LSUOp.NOP, LSUWidth.WORD, LSUsign.UNSIGNED, BRUOp.NOP, ImmType.Z_TYPE, SpecialInstr.ECALL, ZicsrOp.NOP, true.B),  // ECALL
-    "b000000000001_000_00000_1110011".U -> DecodeEntry(ALUOp.NOP, Src1Sel.ZERO, Src2Sel.FOUR, LSUOp.NOP, LSUWidth.WORD, LSUsign.UNSIGNED, BRUOp.NOP, ImmType.Z_TYPE, SpecialInstr.EBREAK, ZicsrOp.NOP, true.B),  // EBREAK
-    "b001100000010_000_00000_1110011".U -> DecodeEntry(ALUOp.NOP, Src1Sel.ZERO, Src2Sel.FOUR, LSUOp.NOP, LSUWidth.WORD, LSUsign.UNSIGNED, BRUOp.NOP, ImmType.Z_TYPE, SpecialInstr.MRET, ZicsrOp.NOP, true.B),  // MRET
-    "b000100000010_000_00000_1110011".U -> DecodeEntry(ALUOp.NOP, Src1Sel.ZERO, Src2Sel.FOUR, LSUOp.NOP, LSUWidth.WORD, LSUsign.UNSIGNED, BRUOp.NOP, ImmType.Z_TYPE, SpecialInstr.SRET, ZicsrOp.NOP, true.B),  // SRET
-    "b000100000101_000_00000_1110011".U -> DecodeEntry(ALUOp.NOP, Src1Sel.ZERO, Src2Sel.FOUR, LSUOp.NOP, LSUWidth.WORD, LSUsign.UNSIGNED, BRUOp.NOP, ImmType.Z_TYPE, SpecialInstr.WFI, ZicsrOp.NOP, true.B),   // WFI
-    "b0001001_00000_000_00000_1110011".U -> DecodeEntry(ALUOp.NOP, Src1Sel.ZERO, Src2Sel.FOUR, LSUOp.NOP, LSUWidth.WORD, LSUsign.UNSIGNED, BRUOp.NOP, ImmType.Z_TYPE, SpecialInstr.SFENCE, ZicsrOp.NOP, true.B)   // SFENCE.VMA
-  ))
-
   // 使用查找表进行指令解码
-  val decodeEntry = decodeTable(inst, defaultEntry)
+  val decodeEntry = MuxLookup(inst, Instructions.defaultEntry, Instructions.table)
 
   // 从解码表项中提取各个信号
   aluOp := decodeEntry.aluOp
