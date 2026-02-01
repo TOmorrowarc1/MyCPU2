@@ -1,0 +1,1252 @@
+package cpu
+
+import chisel3._
+import chisel3.util._
+import chiseltest._
+import org.scalatest.flatspec.AnyFlatSpec
+
+class DecoderTest extends AnyFlatSpec with ChiselScalatestTester {
+
+  // 辅助函数：设置默认输入信号
+  def setDefaultInputs(dut: Decoder): Unit = {
+    dut.io.in.valid.poke(true.B)
+    dut.io.freeRobID.poke(0.U)
+    dut.io.globalFlush.poke(false.B)
+    dut.io.branchFlush.poke(false.B)
+    dut.io.csrPending.poke(false.B)
+    dut.io.renameReq.ready.poke(true.B)
+    dut.io.robInit.ready.poke(true.B)
+    dut.io.dispatch.ready.poke(true.B)
+  }
+
+  // 辅助函数：设置指令元数据
+  def setInstMetadata(dut: Decoder, pc: Long, privMode: PrivMode.Type = PrivMode.M): Unit = {
+    dut.io.in.bits.instMetadata.pc.poke(pc.U)
+    dut.io.in.bits.instMetadata.instEpoch.poke(0.U)
+    dut.io.in.bits.instMetadata.prediction.taken.poke(false.B)
+    dut.io.in.bits.instMetadata.prediction.targetPC.poke((pc + 4).U)
+    dut.io.in.bits.instMetadata.exception.valid.poke(false.B)
+    dut.io.in.bits.instMetadata.exception.cause.poke(0.U)
+    dut.io.in.bits.instMetadata.exception.tval.poke(0.U)
+    dut.io.in.bits.instMetadata.privMode.poke(privMode)
+  }
+
+  // ============================================================================
+  // 1. RV32I 基础整数指令测试（R-Type）
+  // ============================================================================
+
+  "Decoder" should "正确解析 ADD 指令" in {
+    test(new Decoder) { dut =>
+      setDefaultInputs(dut)
+      setInstMetadata(dut, 0x80000000L, PrivMode.M)
+
+      // ADD x1, x2, x3: 0x003100b3 (0000000_00011_00010_000_00001_0110011)
+      dut.io.in.bits.inst.poke(0x003100b3L.U)
+
+      dut.io.renameReq.valid.expect(true.B)
+      dut.io.renameReq.bits.rs1.expect(2.U)
+      dut.io.renameReq.bits.rs2.expect(3.U)
+      dut.io.renameReq.bits.rd.expect(1.U)
+      dut.io.renameReq.bits.isBranch.expect(false.B)
+
+      dut.io.robInit.valid.expect(true.B)
+      dut.io.robInit.bits.pc.expect(0x80000000L.U)
+      dut.io.robInit.bits.isSpecialInstr.expect(SpecialInstr.NONE)
+      dut.io.robInit.bits.exception.valid.expect(false.B)
+
+      dut.io.dispatch.valid.expect(true.B)
+      dut.io.dispatch.bits.microOp.aluOp.expect(ALUOp.ADD)
+      dut.io.dispatch.bits.microOp.op1Src.expect(Src1Sel.REG)
+      dut.io.dispatch.bits.microOp.op2Src.expect(Src2Sel.REG)
+      dut.io.dispatch.bits.microOp.lsuOp.expect(LSUOp.NOP)
+      dut.io.dispatch.bits.microOp.bruOp.expect(BRUOp.NOP)
+
+      dut.io.ifStall.expect(false.B)
+    }
+  }
+
+  it should "正确解析 SUB 指令" in {
+    test(new Decoder) { dut =>
+      setDefaultInputs(dut)
+      setInstMetadata(dut, 0x80000000L, PrivMode.M)
+
+      // SUB x1, x2, x3: 0x403100b3 (0100000_00011_00010_000_00001_0110011)
+      dut.io.in.bits.inst.poke(0x403100b3L.U)
+
+      dut.io.dispatch.bits.microOp.aluOp.expect(ALUOp.SUB)
+      dut.io.renameReq.bits.rs1.expect(2.U)
+      dut.io.renameReq.bits.rs2.expect(3.U)
+      dut.io.renameReq.bits.rd.expect(1.U)
+    }
+  }
+
+  it should "正确解析 SLL 指令" in {
+    test(new Decoder) { dut =>
+      setDefaultInputs(dut)
+      setInstMetadata(dut, 0x80000000L, PrivMode.M)
+
+      // SLL x1, x2, x3: 0x00310133 (0000000_00011_00010_001_00001_0110011)
+      dut.io.in.bits.inst.poke(0x00310133L.U)
+
+      dut.io.dispatch.bits.microOp.aluOp.expect(ALUOp.SLL)
+    }
+  }
+
+  it should "正确解析 SLT 指令" in {
+    test(new Decoder) { dut =>
+      setDefaultInputs(dut)
+      setInstMetadata(dut, 0x80000000L, PrivMode.M)
+
+      // SLT x1, x2, x3: 0x00312033 (0000000_00011_00010_010_00001_0110011)
+      dut.io.in.bits.inst.poke(0x00312033L.U)
+
+      dut.io.dispatch.bits.microOp.aluOp.expect(ALUOp.SLT)
+    }
+  }
+
+  it should "正确解析 SLTU 指令" in {
+    test(new Decoder) { dut =>
+      setDefaultInputs(dut)
+      setInstMetadata(dut, 0x80000000L, PrivMode.M)
+
+      // SLTU x1, x2, x3: 0x00313033 (0000000_00011_00010_011_00001_0110011)
+      dut.io.in.bits.inst.poke(0x00313033L.U)
+
+      dut.io.dispatch.bits.microOp.aluOp.expect(ALUOp.SLTU)
+    }
+  }
+
+  it should "正确解析 XOR 指令" in {
+    test(new Decoder) { dut =>
+      setDefaultInputs(dut)
+      setInstMetadata(dut, 0x80000000L, PrivMode.M)
+
+      // XOR x1, x2, x3: 0x00324033 (0000000_00011_00010_100_00001_0110011)
+      dut.io.in.bits.inst.poke(0x00324033L.U)
+
+      dut.io.dispatch.bits.microOp.aluOp.expect(ALUOp.XOR)
+    }
+  }
+
+  it should "正确解析 SRL 指令" in {
+    test(new Decoder) { dut =>
+      setDefaultInputs(dut)
+      setInstMetadata(dut, 0x80000000L, PrivMode.M)
+
+      // SRL x1, x2, x3: 0x00325033 (0000000_00011_00010_101_00001_0110011)
+      dut.io.in.bits.inst.poke(0x00325033L.U)
+
+      dut.io.dispatch.bits.microOp.aluOp.expect(ALUOp.SRL)
+    }
+  }
+
+  it should "正确解析 SRA 指令" in {
+    test(new Decoder) { dut =>
+      setDefaultInputs(dut)
+      setInstMetadata(dut, 0x80000000L, PrivMode.M)
+
+      // SRA x1, x2, x3: 0x40325033 (0100000_00011_00010_101_00001_0110011)
+      dut.io.in.bits.inst.poke(0x40325033L.U)
+
+      dut.io.dispatch.bits.microOp.aluOp.expect(ALUOp.SRA)
+    }
+  }
+
+  it should "正确解析 OR 指令" in {
+    test(new Decoder) { dut =>
+      setDefaultInputs(dut)
+      setInstMetadata(dut, 0x80000000L, PrivMode.M)
+
+      // OR x1, x2, x3: 0x00326033 (0000000_00011_00010_110_00001_0110011)
+      dut.io.in.bits.inst.poke(0x00326033L.U)
+
+      dut.io.dispatch.bits.microOp.aluOp.expect(ALUOp.OR)
+    }
+  }
+
+  it should "正确解析 AND 指令" in {
+    test(new Decoder) { dut =>
+      setDefaultInputs(dut)
+      setInstMetadata(dut, 0x80000000L, PrivMode.M)
+
+      // AND x1, x2, x3: 0x00327033 (0000000_00011_00010_111_00001_0110011)
+      dut.io.in.bits.inst.poke(0x00327033L.U)
+
+      dut.io.dispatch.bits.microOp.aluOp.expect(ALUOp.AND)
+    }
+  }
+
+  // ============================================================================
+  // 2. RV32I 基础整数指令测试（I-Type）
+  // ============================================================================
+
+  it should "正确解析 ADDI 指令" in {
+    test(new Decoder) { dut =>
+      setDefaultInputs(dut)
+      setInstMetadata(dut, 0x80000000L, PrivMode.M)
+
+      // ADDI x1, x2, 0x123: 0x12309113 (imm[11:0]=0x123, rs1=2, rd=1)
+      dut.io.in.bits.inst.poke(0x12309113L.U)
+
+      dut.io.dispatch.bits.microOp.aluOp.expect(ALUOp.ADD)
+      dut.io.dispatch.bits.microOp.op1Src.expect(Src1Sel.REG)
+      dut.io.dispatch.bits.microOp.op2Src.expect(Src2Sel.IMM)
+      dut.io.dispatch.bits.imm.expect(0x123L.U)
+      dut.io.renameReq.bits.rs1.expect(2.U)
+      dut.io.renameReq.bits.rd.expect(1.U)
+    }
+  }
+
+  it should "正确解析 SLTI 指令" in {
+    test(new Decoder) { dut =>
+      setDefaultInputs(dut)
+      setInstMetadata(dut, 0x80000000L, PrivMode.M)
+
+      // SLTI x1, x2, 0x123: 0x12309213 (imm[11:0]=0x123, rs1=2, rd=1)
+      dut.io.in.bits.inst.poke(0x12309213L.U)
+
+      dut.io.dispatch.bits.microOp.aluOp.expect(ALUOp.SLT)
+      dut.io.dispatch.bits.microOp.op2Src.expect(Src2Sel.IMM)
+    }
+  }
+
+  it should "正确解析 SLTIU 指令" in {
+    test(new Decoder) { dut =>
+      setDefaultInputs(dut)
+      setInstMetadata(dut, 0x80000000L, PrivMode.M)
+
+      // SLTIU x1, x2, 0x123: 0x12309313
+      dut.io.in.bits.inst.poke(0x12309313L.U)
+
+      dut.io.dispatch.bits.microOp.aluOp.expect(ALUOp.SLTU)
+    }
+  }
+
+  it should "正确解析 XORI 指令" in {
+    test(new Decoder) { dut =>
+      setDefaultInputs(dut)
+      setInstMetadata(dut, 0x80000000L, PrivMode.M)
+
+      // XORI x1, x2, 0x123: 0x12309413
+      dut.io.in.bits.inst.poke(0x12309413L.U)
+
+      dut.io.dispatch.bits.microOp.aluOp.expect(ALUOp.XOR)
+    }
+  }
+
+  it should "正确解析 ORI 指令" in {
+    test(new Decoder) { dut =>
+      setDefaultInputs(dut)
+      setInstMetadata(dut, 0x80000000L, PrivMode.M)
+
+      // ORI x1, x2, 0x123: 0x12309613
+      dut.io.in.bits.inst.poke(0x12309613L.U)
+
+      dut.io.dispatch.bits.microOp.aluOp.expect(ALUOp.OR)
+    }
+  }
+
+  it should "正确解析 ANDI 指令" in {
+    test(new Decoder) { dut =>
+      setDefaultInputs(dut)
+      setInstMetadata(dut, 0x80000000L, PrivMode.M)
+
+      // ANDI x1, x2, 0x123: 0x12309713
+      dut.io.in.bits.inst.poke(0x12309713L.U)
+
+      dut.io.dispatch.bits.microOp.aluOp.expect(ALUOp.AND)
+    }
+  }
+
+  it should "正确解析 SLLI 指令" in {
+    test(new Decoder) { dut =>
+      setDefaultInputs(dut)
+      setInstMetadata(dut, 0x80000000L, PrivMode.M)
+
+      // SLLI x1, x2, 5: 0x00509113 (shamt=5, rs1=2, rd=1)
+      dut.io.in.bits.inst.poke(0x00509113L.U)
+
+      dut.io.dispatch.bits.microOp.aluOp.expect(ALUOp.SLL)
+      dut.io.dispatch.bits.microOp.op2Src.expect(Src2Sel.IMM)
+      dut.io.dispatch.bits.imm.expect(5.U)
+    }
+  }
+
+  it should "正确解析 SRLI 指令" in {
+    test(new Decoder) { dut =>
+      setDefaultInputs(dut)
+      setInstMetadata(dut, 0x80000000L, PrivMode.M)
+
+      // SRLI x1, x2, 5: 0x00509513
+      dut.io.in.bits.inst.poke(0x00509513L.U)
+
+      dut.io.dispatch.bits.microOp.aluOp.expect(ALUOp.SRL)
+    }
+  }
+
+  it should "正确解析 SRAI 指令" in {
+    test(new Decoder) { dut =>
+      setDefaultInputs(dut)
+      setInstMetadata(dut, 0x80000000L, PrivMode.M)
+
+      // SRAI x1, x2, 5: 0x40509513
+      dut.io.in.bits.inst.poke(0x40509513L.U)
+
+      dut.io.dispatch.bits.microOp.aluOp.expect(ALUOp.SRA)
+    }
+  }
+
+  // ============================================================================
+  // 3. RV32I 大立即数与 PC 相关指令测试（U-Type）
+  // ============================================================================
+
+  it should "正确解析 LUI 指令" in {
+    test(new Decoder) { dut =>
+      setDefaultInputs(dut)
+      setInstMetadata(dut, 0x80000000L, PrivMode.M)
+
+      // LUI x1, 0x12345: 0x123450b7 (imm[31:12]=0x12345, rd=1)
+      dut.io.in.bits.inst.poke(0x123450b7L.U)
+
+      dut.io.dispatch.bits.microOp.aluOp.expect(ALUOp.ADD)
+      dut.io.dispatch.bits.microOp.op1Src.expect(Src1Sel.ZERO)
+      dut.io.dispatch.bits.microOp.op2Src.expect(Src2Sel.IMM)
+      dut.io.dispatch.bits.imm.expect(0x12345000L.U)
+      dut.io.renameReq.bits.rd.expect(1.U)
+    }
+  }
+
+  it should "正确解析 AUIPC 指令" in {
+    test(new Decoder) { dut =>
+      setDefaultInputs(dut)
+      setInstMetadata(dut, 0x80000000L, PrivMode.M)
+
+      // AUIPC x1, 0x12345: 0x12345097
+      dut.io.in.bits.inst.poke(0x12345097L.U)
+
+      dut.io.dispatch.bits.microOp.aluOp.expect(ALUOp.ADD)
+      dut.io.dispatch.bits.microOp.op1Src.expect(Src1Sel.PC)
+      dut.io.dispatch.bits.microOp.op2Src.expect(Src2Sel.IMM)
+      dut.io.dispatch.bits.imm.expect(0x12345000L.U)
+    }
+  }
+
+  // ============================================================================
+  // 4. RV32I 控制流指令测试（B-Type/J-Type）
+  // ============================================================================
+
+  it should "正确解析 BEQ 指令" in {
+    test(new Decoder) { dut =>
+      setDefaultInputs(dut)
+      setInstMetadata(dut, 0x80000000L, PrivMode.M)
+
+      // BEQ x1, x2, 0x10: 0x00208463 (imm=0x10, rs2=2, rs1=1)
+      dut.io.in.bits.inst.poke(0x00208463L.U)
+
+      dut.io.dispatch.bits.microOp.bruOp.expect(BRUOp.BEQ)
+      dut.io.dispatch.bits.microOp.op1Src.expect(Src1Sel.ZERO)
+      dut.io.dispatch.bits.microOp.op2Src.expect(Src2Sel.FOUR)
+      dut.io.dispatch.bits.imm.expect(0x10L.U)
+      dut.io.renameReq.bits.isBranch.expect(true.B)
+      dut.io.robInit.bits.isSpecialInstr.expect(SpecialInstr.BRANCH)
+    }
+  }
+
+  it should "正确解析 BNE 指令" in {
+    test(new Decoder) { dut =>
+      setDefaultInputs(dut)
+      setInstMetadata(dut, 0x80000000L, PrivMode.M)
+
+      // BNE x1, x2, 0x10: 0x00209463
+      dut.io.in.bits.inst.poke(0x00209463L.U)
+
+      dut.io.dispatch.bits.microOp.bruOp.expect(BRUOp.BNE)
+    }
+  }
+
+  it should "正确解析 BLT 指令" in {
+    test(new Decoder) { dut =>
+      setDefaultInputs(dut)
+      setInstMetadata(dut, 0x80000000L, PrivMode.M)
+
+      // BLT x1, x2, 0x10: 0x0020c463
+      dut.io.in.bits.inst.poke(0x0020c463L.U)
+
+      dut.io.dispatch.bits.microOp.bruOp.expect(BRUOp.BLT)
+    }
+  }
+
+  it should "正确解析 BGE 指令" in {
+    test(new Decoder) { dut =>
+      setDefaultInputs(dut)
+      setInstMetadata(dut, 0x80000000L, PrivMode.M)
+
+      // BGE x1, x2, 0x10: 0x0020d463
+      dut.io.in.bits.inst.poke(0x0020d463L.U)
+
+      dut.io.dispatch.bits.microOp.bruOp.expect(BRUOp.BGE)
+    }
+  }
+
+  it should "正确解析 BLTU 指令" in {
+    test(new Decoder) { dut =>
+      setDefaultInputs(dut)
+      setInstMetadata(dut, 0x80000000L, PrivMode.M)
+
+      // BLTU x1, x2, 0x10: 0x0020e463
+      dut.io.in.bits.inst.poke(0x0020e463L.U)
+
+      dut.io.dispatch.bits.microOp.bruOp.expect(BRUOp.BLTU)
+    }
+  }
+
+  it should "正确解析 BGEU 指令" in {
+    test(new Decoder) { dut =>
+      setDefaultInputs(dut)
+      setInstMetadata(dut, 0x80000000L, PrivMode.M)
+
+      // BGEU x1, x2, 0x10: 0x0020f463
+      dut.io.in.bits.inst.poke(0x0020f463L.U)
+
+      dut.io.dispatch.bits.microOp.bruOp.expect(BRUOp.BGEU)
+    }
+  }
+
+  it should "正确解析 JAL 指令" in {
+    test(new Decoder) { dut =>
+      setDefaultInputs(dut)
+      setInstMetadata(dut, 0x80000000L, PrivMode.M)
+
+      // JAL x1, 0x100: 0x100000ef (imm=0x100, rd=1)
+      dut.io.in.bits.inst.poke(0x100000efL.U)
+
+      dut.io.dispatch.bits.microOp.bruOp.expect(BRUOp.JAL)
+      dut.io.dispatch.bits.microOp.op1Src.expect(Src1Sel.ZERO)
+      dut.io.dispatch.bits.microOp.op2Src.expect(Src2Sel.FOUR)
+      dut.io.dispatch.bits.imm.expect(0x100L.U)
+      dut.io.renameReq.bits.isBranch.expect(true.B)
+    }
+  }
+
+  it should "正确解析 JALR 指令" in {
+    test(new Decoder) { dut =>
+      setDefaultInputs(dut)
+      setInstMetadata(dut, 0x80000000L, PrivMode.M)
+
+      // JALR x1, x2, 0x10: 0x010090e7 (imm=0x10, rs1=2, rd=1)
+      dut.io.in.bits.inst.poke(0x010090e7L.U)
+
+      dut.io.dispatch.bits.microOp.bruOp.expect(BRUOp.JALR)
+      dut.io.dispatch.bits.imm.expect(0x10L.U)
+      dut.io.renameReq.bits.rs1.expect(2.U)
+    }
+  }
+
+  // ============================================================================
+  // 5. RV32I 访存指令测试
+  // ============================================================================
+
+  it should "正确解析 LB 指令" in {
+    test(new Decoder) { dut =>
+      setDefaultInputs(dut)
+      setInstMetadata(dut, 0x80000000L, PrivMode.M)
+
+      // LB x1, 0x10(x2): 0x01009083 (imm=0x10, rs1=2, rd=1)
+      dut.io.in.bits.inst.poke(0x01009083L.U)
+
+      dut.io.dispatch.bits.microOp.aluOp.expect(ALUOp.ADD)
+      dut.io.dispatch.bits.microOp.lsuOp.expect(LSUOp.LOAD)
+      dut.io.dispatch.bits.microOp.lsuWidth.expect(LSUWidth.BYTE)
+      dut.io.dispatch.bits.microOp.lsuSign.expect(LSUsign.SIGNED)
+      dut.io.dispatch.bits.imm.expect(0x10L.U)
+      dut.io.renameReq.bits.rs1.expect(2.U)
+      dut.io.renameReq.bits.rd.expect(1.U)
+    }
+  }
+
+  it should "正确解析 LH 指令" in {
+    test(new Decoder) { dut =>
+      setDefaultInputs(dut)
+      setInstMetadata(dut, 0x80000000L, PrivMode.M)
+
+      // LH x1, 0x10(x2): 0x01009103
+      dut.io.in.bits.inst.poke(0x01009103L.U)
+
+      dut.io.dispatch.bits.microOp.lsuOp.expect(LSUOp.LOAD)
+      dut.io.dispatch.bits.microOp.lsuWidth.expect(LSUWidth.HALF)
+      dut.io.dispatch.bits.microOp.lsuSign.expect(LSUsign.SIGNED)
+    }
+  }
+
+  it should "正确解析 LW 指令" in {
+    test(new Decoder) { dut =>
+      setDefaultInputs(dut)
+      setInstMetadata(dut, 0x80000000L, PrivMode.M)
+
+      // LW x1, 0x10(x2): 0x01009183
+      dut.io.in.bits.inst.poke(0x01009183L.U)
+
+      dut.io.dispatch.bits.microOp.lsuOp.expect(LSUOp.LOAD)
+      dut.io.dispatch.bits.microOp.lsuWidth.expect(LSUWidth.WORD)
+      dut.io.dispatch.bits.microOp.lsuSign.expect(LSUsign.SIGNED)
+    }
+  }
+
+  it should "正确解析 LBU 指令" in {
+    test(new Decoder) { dut =>
+      setDefaultInputs(dut)
+      setInstMetadata(dut, 0x80000000L, PrivMode.M)
+
+      // LBU x1, 0x10(x2): 0x01009403
+      dut.io.in.bits.inst.poke(0x01009403L.U)
+
+      dut.io.dispatch.bits.microOp.lsuOp.expect(LSUOp.LOAD)
+      dut.io.dispatch.bits.microOp.lsuWidth.expect(LSUWidth.BYTE)
+      dut.io.dispatch.bits.microOp.lsuSign.expect(LSUsign.UNSIGNED)
+    }
+  }
+
+  it should "正确解析 LHU 指令" in {
+    test(new Decoder) { dut =>
+      setDefaultInputs(dut)
+      setInstMetadata(dut, 0x80000000L, PrivMode.M)
+
+      // LHU x1, 0x10(x2): 0x01009503
+      dut.io.in.bits.inst.poke(0x01009503L.U)
+
+      dut.io.dispatch.bits.microOp.lsuOp.expect(LSUOp.LOAD)
+      dut.io.dispatch.bits.microOp.lsuWidth.expect(LSUWidth.HALF)
+      dut.io.dispatch.bits.microOp.lsuSign.expect(LSUsign.UNSIGNED)
+    }
+  }
+
+  it should "正确解析 SB 指令" in {
+    test(new Decoder) { dut =>
+      setDefaultInputs(dut)
+      setInstMetadata(dut, 0x80000000L, PrivMode.M)
+
+      // SB x3, 0x10(x1): 0x00308423 (imm=0x10, rs2=3, rs1=1)
+      dut.io.in.bits.inst.poke(0x00308423L.U)
+
+      dut.io.dispatch.bits.microOp.aluOp.expect(ALUOp.ADD)
+      dut.io.dispatch.bits.microOp.lsuOp.expect(LSUOp.STORE)
+      dut.io.dispatch.bits.microOp.lsuWidth.expect(LSUWidth.BYTE)
+      dut.io.dispatch.bits.microOp.lsuSign.expect(LSUsign.UNSIGNED)
+      dut.io.dispatch.bits.imm.expect(0x10L.U)
+      dut.io.renameReq.bits.rs1.expect(1.U)
+      dut.io.renameReq.bits.rs2.expect(3.U)
+      dut.io.robInit.bits.isSpecialInstr.expect(SpecialInstr.STORE)
+    }
+  }
+
+  it should "正确解析 SH 指令" in {
+    test(new Decoder) { dut =>
+      setDefaultInputs(dut)
+      setInstMetadata(dut, 0x80000000L, PrivMode.M)
+
+      // SH x3, 0x10(x1): 0x00309423
+      dut.io.in.bits.inst.poke(0x00309423L.U)
+
+      dut.io.dispatch.bits.microOp.lsuOp.expect(LSUOp.STORE)
+      dut.io.dispatch.bits.microOp.lsuWidth.expect(LSUWidth.HALF)
+    }
+  }
+
+  it should "正确解析 SW 指令" in {
+    test(new Decoder) { dut =>
+      setDefaultInputs(dut)
+      setInstMetadata(dut, 0x80000000L, PrivMode.M)
+
+      // SW x3, 0x10(x1): 0x0030a423
+      dut.io.in.bits.inst.poke(0x0030a423L.U)
+
+      dut.io.dispatch.bits.microOp.lsuOp.expect(LSUOp.STORE)
+      dut.io.dispatch.bits.microOp.lsuWidth.expect(LSUWidth.WORD)
+    }
+  }
+
+  it should "正确解析 FENCE 指令" in {
+    test(new Decoder) { dut =>
+      setDefaultInputs(dut)
+      setInstMetadata(dut, 0x80000000L, PrivMode.M)
+
+      // FENCE: 0x0000000f
+      dut.io.in.bits.inst.poke(0x0000000fL.U)
+
+      dut.io.robInit.bits.isSpecialInstr.expect(SpecialInstr.FENCE)
+      dut.io.dispatch.bits.microOp.aluOp.expect(ALUOp.NOP)
+      dut.io.dispatch.bits.microOp.op1Src.expect(Src1Sel.ZERO)
+      dut.io.dispatch.bits.microOp.op2Src.expect(Src2Sel.FOUR)
+    }
+  }
+
+  // ============================================================================
+  // 6. Zifencei 扩展指令测试
+  // ============================================================================
+
+  it should "正确解析 FENCE.I 指令" in {
+    test(new Decoder) { dut =>
+      setDefaultInputs(dut)
+      setInstMetadata(dut, 0x80000000L, PrivMode.M)
+
+      // FENCE.I: 0x0000100f
+      dut.io.in.bits.inst.poke(0x0000100fL.U)
+
+      dut.io.robInit.bits.isSpecialInstr.expect(SpecialInstr.FENCEI)
+      dut.io.dispatch.bits.microOp.aluOp.expect(ALUOp.NOP)
+      dut.io.dispatch.bits.microOp.op1Src.expect(Src1Sel.ZERO)
+      dut.io.dispatch.bits.microOp.op2Src.expect(Src2Sel.FOUR)
+    }
+  }
+
+  // ============================================================================
+  // 7. Zicsr 扩展指令测试
+  // ============================================================================
+
+  it should "正确解析 CSRRW 指令" in {
+    test(new Decoder) { dut =>
+      setDefaultInputs(dut)
+      setInstMetadata(dut, 0x80000000L, PrivMode.M)
+
+      // CSRRW x1, mstatus, x2: 0x30029173 (csr=0x300, rs1=2, rd=1)
+      dut.io.in.bits.inst.poke(0x30029173L.U)
+
+      dut.io.robInit.bits.isSpecialInstr.expect(SpecialInstr.CSR)
+      dut.io.dispatch.bits.microOp.zicsrOp.expect(ZicsrOp.RW)
+      dut.io.dispatch.bits.microOp.op1Src.expect(Src1Sel.REG)
+      dut.io.dispatch.bits.microOp.op2Src.expect(Src2Sel.FOUR)
+      dut.io.renameReq.bits.rs1.expect(2.U)
+      dut.io.renameReq.bits.rd.expect(1.U)
+    }
+  }
+
+  it should "正确解析 CSRRS 指令" in {
+    test(new Decoder) { dut =>
+      setDefaultInputs(dut)
+      setInstMetadata(dut, 0x80000000L, PrivMode.M)
+
+      // CSRRS x1, mstatus, x2: 0x30029273
+      dut.io.in.bits.inst.poke(0x30029273L.U)
+
+      dut.io.robInit.bits.isSpecialInstr.expect(SpecialInstr.CSR)
+      dut.io.dispatch.bits.microOp.zicsrOp.expect(ZicsrOp.RS)
+    }
+  }
+
+  it should "正确解析 CSRRC 指令" in {
+    test(new Decoder) { dut =>
+      setDefaultInputs(dut)
+      setInstMetadata(dut, 0x80000000L, PrivMode.M)
+
+      // CSRRC x1, mstatus, x2: 0x30029373
+      dut.io.in.bits.inst.poke(0x30029373L.U)
+
+      dut.io.robInit.bits.isSpecialInstr.expect(SpecialInstr.CSR)
+      dut.io.dispatch.bits.microOp.zicsrOp.expect(ZicsrOp.RC)
+    }
+  }
+
+  it should "正确解析 CSRRWI 指令" in {
+    test(new Decoder) { dut =>
+      setDefaultInputs(dut)
+      setInstMetadata(dut, 0x80000000L, PrivMode.M)
+
+      // CSRRWI x1, mstatus, 5: 0x30509173 (csr=0x300, uimm=5, rd=1)
+      dut.io.in.bits.inst.poke(0x30509173L.U)
+
+      dut.io.robInit.bits.isSpecialInstr.expect(SpecialInstr.CSR)
+      dut.io.dispatch.bits.microOp.zicsrOp.expect(ZicsrOp.RW)
+      dut.io.dispatch.bits.microOp.op1Src.expect(Src1Sel.ZERO)
+      dut.io.dispatch.bits.imm.expect(5.U)
+    }
+  }
+
+  it should "正确解析 CSRRSI 指令" in {
+    test(new Decoder) { dut =>
+      setDefaultInputs(dut)
+      setInstMetadata(dut, 0x80000000L, PrivMode.M)
+
+      // CSRRSI x1, mstatus, 5: 0x30509273
+      dut.io.in.bits.inst.poke(0x30509273L.U)
+
+      dut.io.robInit.bits.isSpecialInstr.expect(SpecialInstr.CSR)
+      dut.io.dispatch.bits.microOp.zicsrOp.expect(ZicsrOp.RS)
+    }
+  }
+
+  it should "正确解析 CSRRCI 指令" in {
+    test(new Decoder) { dut =>
+      setDefaultInputs(dut)
+      setInstMetadata(dut, 0x80000000L, PrivMode.M)
+
+      // CSRRCI x1, mstatus, 5: 0x30509373
+      dut.io.in.bits.inst.poke(0x30509373L.U)
+
+      dut.io.robInit.bits.isSpecialInstr.expect(SpecialInstr.CSR)
+      dut.io.dispatch.bits.microOp.zicsrOp.expect(ZicsrOp.RC)
+    }
+  }
+
+  // ============================================================================
+  // 8. 特权指令测试
+  // ============================================================================
+
+  it should "正确解析 ECALL 指令" in {
+    test(new Decoder) { dut =>
+      setDefaultInputs(dut)
+      setInstMetadata(dut, 0x80000000L, PrivMode.M)
+
+      // ECALL: 0x00000073
+      dut.io.in.bits.inst.poke(0x00000073L.U)
+
+      dut.io.robInit.bits.isSpecialInstr.expect(SpecialInstr.ECALL)
+      dut.io.robInit.bits.exception.valid.expect(true.B)
+      dut.io.robInit.bits.exception.cause.expect(ExceptionCause.ECALL_FROM_M_MODE)
+      dut.io.robInit.bits.exception.tval.expect(0x80000000L.U)
+      dut.io.dispatch.valid.expect(false.B)
+    }
+  }
+
+  it should "正确解析 EBREAK 指令" in {
+    test(new Decoder) { dut =>
+      setDefaultInputs(dut)
+      setInstMetadata(dut, 0x80000000L, PrivMode.M)
+
+      // EBREAK: 0x00100073
+      dut.io.in.bits.inst.poke(0x00100073L.U)
+
+      dut.io.robInit.bits.isSpecialInstr.expect(SpecialInstr.EBREAK)
+      dut.io.robInit.bits.exception.valid.expect(true.B)
+      dut.io.robInit.bits.exception.cause.expect(ExceptionCause.BREAKPOINT)
+      dut.io.robInit.bits.exception.tval.expect(0x80000000L.U)
+      dut.io.dispatch.valid.expect(false.B)
+    }
+  }
+
+  it should "正确解析 MRET 指令" in {
+    test(new Decoder) { dut =>
+      setDefaultInputs(dut)
+      setInstMetadata(dut, 0x80000000L, PrivMode.M)
+
+      // MRET: 0x30200073
+      dut.io.in.bits.inst.poke(0x30200073L.U)
+
+      dut.io.robInit.bits.isSpecialInstr.expect(SpecialInstr.MRET)
+    }
+  }
+
+  it should "正确解析 SRET 指令" in {
+    test(new Decoder) { dut =>
+      setDefaultInputs(dut)
+      setInstMetadata(dut, 0x80000000L, PrivMode.M)
+
+      // SRET: 0x10200073
+      dut.io.in.bits.inst.poke(0x10200073L.U)
+
+      dut.io.robInit.bits.isSpecialInstr.expect(SpecialInstr.SRET)
+    }
+  }
+
+  it should "正确解析 WFI 指令" in {
+    test(new Decoder) { dut =>
+      setDefaultInputs(dut)
+      setInstMetadata(dut, 0x80000000L, PrivMode.M)
+
+      // WFI: 0x10500073
+      dut.io.in.bits.inst.poke(0x10500073L.U)
+
+      dut.io.robInit.bits.isSpecialInstr.expect(SpecialInstr.WFI)
+    }
+  }
+
+  it should "正确解析 SFENCE.VMA 指令" in {
+    test(new Decoder) { dut =>
+      setDefaultInputs(dut)
+      setInstMetadata(dut, 0x80000000L, PrivMode.M)
+
+      // SFENCE.VMA x1, x2: 0x12000073
+      dut.io.in.bits.inst.poke(0x12000073L.U)
+
+      dut.io.robInit.bits.isSpecialInstr.expect(SpecialInstr.SFENCE)
+    }
+  }
+
+  // ============================================================================
+  // 9. 异常检测测试
+  // ============================================================================
+
+  it should "检测非法指令异常" in {
+    test(new Decoder) { dut =>
+      setDefaultInputs(dut)
+      setInstMetadata(dut, 0x80000000L, PrivMode.M)
+
+      // 非法指令：0xffffffff
+      dut.io.in.bits.inst.poke(0xffffffffL.U)
+
+      dut.io.robInit.bits.exception.valid.expect(true.B)
+      dut.io.robInit.bits.exception.cause.expect(ExceptionCause.ILLEGAL_INSTRUCTION)
+      dut.io.robInit.bits.exception.tval.expect(0x80000000L.U)
+      dut.io.dispatch.valid.expect(false.B)
+    }
+  }
+
+  it should "检测 CSR 越权访问异常（U 模式访问 M-only CSR）" in {
+    test(new Decoder) { dut =>
+      setDefaultInputs(dut)
+      setInstMetadata(dut, 0x80000000L, PrivMode.U)
+
+      // CSRRW x1, mstatus (0x300), x2: 在 U 模式下访问 M-only CSR
+      dut.io.in.bits.inst.poke(0x30029173L.U)
+
+      dut.io.robInit.bits.exception.valid.expect(true.B)
+      dut.io.robInit.bits.exception.cause.expect(ExceptionCause.ILLEGAL_INSTRUCTION)
+      dut.io.robInit.bits.exception.tval.expect(0x80000000L.U)
+    }
+  }
+
+  it should "检测 CSR 越权访问异常（S 模式访问 M-only CSR）" in {
+    test(new Decoder) { dut =>
+      setDefaultInputs(dut)
+      setInstMetadata(dut, 0x80000000L, PrivMode.S)
+
+      // CSRRW x1, mstatus (0x300), x2: 在 S 模式下访问 M-only CSR
+      dut.io.in.bits.inst.poke(0x30029173L.U)
+
+      dut.io.robInit.bits.exception.valid.expect(true.B)
+      dut.io.robInit.bits.exception.cause.expect(ExceptionCause.ILLEGAL_INSTRUCTION)
+    }
+  }
+
+  it should "允许 M 模式访问 M-only CSR" in {
+    test(new Decoder) { dut =>
+      setDefaultInputs(dut)
+      setInstMetadata(dut, 0x80000000L, PrivMode.M)
+
+      // CSRRW x1, mstatus (0x300), x2: 在 M 模式下访问 M-only CSR（合法）
+      dut.io.in.bits.inst.poke(0x30029173L.U)
+
+      dut.io.robInit.bits.exception.valid.expect(false.B)
+      dut.io.dispatch.valid.expect(true.B)
+    }
+  }
+
+  it should "检测 ECALL 异常（U 模式）" in {
+    test(new Decoder) { dut =>
+      setDefaultInputs(dut)
+      setInstMetadata(dut, 0x80000000L, PrivMode.U)
+
+      // ECALL: 0x00000073
+      dut.io.in.bits.inst.poke(0x00000073L.U)
+
+      dut.io.robInit.bits.exception.valid.expect(true.B)
+      dut.io.robInit.bits.exception.cause.expect(ExceptionCause.ECALL_FROM_U_MODE)
+      dut.io.robInit.bits.exception.tval.expect(0x80000000L.U)
+      dut.io.dispatch.valid.expect(false.B)
+    }
+  }
+
+  it should "检测 ECALL 异常（S 模式）" in {
+    test(new Decoder) { dut =>
+      setDefaultInputs(dut)
+      setInstMetadata(dut, 0x80000000L, PrivMode.S)
+
+      // ECALL: 0x00000073
+      dut.io.in.bits.inst.poke(0x00000073L.U)
+
+      dut.io.robInit.bits.exception.valid.expect(true.B)
+      dut.io.robInit.bits.exception.cause.expect(ExceptionCause.ECALL_FROM_S_MODE)
+      dut.io.dispatch.valid.expect(false.B)
+    }
+  }
+
+  it should "检测 ECALL 异常（M 模式）" in {
+    test(new Decoder) { dut =>
+      setDefaultInputs(dut)
+      setInstMetadata(dut, 0x80000000L, PrivMode.M)
+
+      // ECALL: 0x00000073
+      dut.io.in.bits.inst.poke(0x00000073L.U)
+
+      dut.io.robInit.bits.exception.valid.expect(true.B)
+      dut.io.robInit.bits.exception.cause.expect(ExceptionCause.ECALL_FROM_M_MODE)
+      dut.io.dispatch.valid.expect(false.B)
+    }
+  }
+
+  it should "检测 EBREAK 异常" in {
+    test(new Decoder) { dut =>
+      setDefaultInputs(dut)
+      setInstMetadata(dut, 0x80000000L, PrivMode.M)
+
+      // EBREAK: 0x00100073
+      dut.io.in.bits.inst.poke(0x00100073L.U)
+
+      dut.io.robInit.bits.exception.valid.expect(true.B)
+      dut.io.robInit.bits.exception.cause.expect(ExceptionCause.BREAKPOINT)
+      dut.io.robInit.bits.exception.tval.expect(0x80000000L.U)
+      dut.io.dispatch.valid.expect(false.B)
+    }
+  }
+
+  it should "输入异常优先级高于译码异常" in {
+    test(new Decoder) { dut =>
+      setDefaultInputs(dut)
+      setInstMetadata(dut, 0x80000000L, PrivMode.M)
+
+      // 设置输入异常
+      dut.io.in.bits.instMetadata.exception.valid.poke(true.B)
+      dut.io.in.bits.instMetadata.exception.cause.poke(ExceptionCause.ILLEGAL_INSTRUCTION)
+      dut.io.in.bits.instMetadata.exception.tval.poke(0x80000000L.U)
+
+      // 合法指令
+      dut.io.in.bits.inst.poke(0x003100b3L.U) // ADD x1, x2, x3
+
+      // 应该使用输入异常
+      dut.io.robInit.bits.exception.valid.expect(true.B)
+      dut.io.robInit.bits.exception.cause.expect(ExceptionCause.ILLEGAL_INSTRUCTION)
+      dut.io.robInit.bits.exception.tval.expect(0x80000000L.U)
+    }
+  }
+
+  // ============================================================================
+  // 10. 流水线控制信号测试
+  // ============================================================================
+
+  it should "ROB 满时发出 stall 信号" in {
+    test(new Decoder) { dut =>
+      setDefaultInputs(dut)
+      setInstMetadata(dut, 0x80000000L, PrivMode.M)
+
+      // 设置 ROB 满
+      dut.io.robInit.ready.poke(false.B)
+
+      // 合法指令
+      dut.io.in.bits.inst.poke(0x003100b3L.U) // ADD x1, x2, x3
+
+      dut.io.ifStall.expect(true.B)
+      dut.io.in.ready.expect(false.B)
+      dut.io.renameReq.valid.expect(false.B)
+      dut.io.robInit.valid.expect(false.B)
+      dut.io.dispatch.valid.expect(false.B)
+    }
+  }
+
+  it should "RS 满时发出 stall 信号" in {
+    test(new Decoder) { dut =>
+      setDefaultInputs(dut)
+      setInstMetadata(dut, 0x80000000L, PrivMode.M)
+
+      // 设置 RS 满
+      dut.io.dispatch.ready.poke(false.B)
+
+      // 合法指令
+      dut.io.in.bits.inst.poke(0x003100b3L.U)
+
+      dut.io.ifStall.expect(true.B)
+      dut.io.in.ready.expect(false.B)
+    }
+  }
+
+  it should "RAT 满时发出 stall 信号" in {
+    test(new Decoder) { dut =>
+      setDefaultInputs(dut)
+      setInstMetadata(dut, 0x80000000L, PrivMode.M)
+
+      // 设置 RAT 满
+      dut.io.renameReq.ready.poke(false.B)
+
+      // 合法指令
+      dut.io.in.bits.inst.poke(0x003100b3L.U)
+
+      dut.io.ifStall.expect(true.B)
+      dut.io.in.ready.expect(false.B)
+    }
+  }
+
+  it should "CSR 指令解析时发出 stall 信号" in {
+    test(new Decoder) { dut =>
+      setDefaultInputs(dut)
+      setInstMetadata(dut, 0x80000000L, PrivMode.M)
+
+      // CSRRW x1, mstatus, x2: 0x30029173
+      dut.io.in.bits.inst.poke(0x30029173L.U)
+
+      dut.io.ifStall.expect(true.B)
+      dut.io.in.ready.expect(false.B)
+    }
+  }
+
+  it should "ECALL 指令解析时发出 stall 信号" in {
+    test(new Decoder) { dut =>
+      setDefaultInputs(dut)
+      setInstMetadata(dut, 0x80000000L, PrivMode.M)
+
+      // ECALL: 0x00000073
+      dut.io.in.bits.inst.poke(0x00000073L.U)
+
+      dut.io.ifStall.expect(true.B)
+      dut.io.in.ready.expect(false.B)
+    }
+  }
+
+  it should "EBREAK 指令解析时发出 stall 信号" in {
+    test(new Decoder) { dut =>
+      setDefaultInputs(dut)
+      setInstMetadata(dut, 0x80000000L, PrivMode.M)
+
+      // EBREAK: 0x00100073
+      dut.io.in.bits.inst.poke(0x00100073L.U)
+
+      dut.io.ifStall.expect(true.B)
+      dut.io.in.ready.expect(false.B)
+    }
+  }
+
+  it should "MRET 指令解析时发出 stall 信号" in {
+    test(new Decoder) { dut =>
+      setDefaultInputs(dut)
+      setInstMetadata(dut, 0x80000000L, PrivMode.M)
+
+      // MRET: 0x30200073
+      dut.io.in.bits.inst.poke(0x30200073L.U)
+
+      dut.io.ifStall.expect(true.B)
+      dut.io.in.ready.expect(false.B)
+    }
+  }
+
+  it should "SRET 指令解析时发出 stall 信号" in {
+    test(new Decoder) { dut =>
+      setDefaultInputs(dut)
+      setInstMetadata(dut, 0x80000000L, PrivMode.M)
+
+      // SRET: 0x10200073
+      dut.io.in.bits.inst.poke(0x10200073L.U)
+
+      dut.io.ifStall.expect(true.B)
+      dut.io.in.ready.expect(false.B)
+    }
+  }
+
+  it should "WFI 指令解析时发出 stall 信号" in {
+    test(new Decoder) { dut =>
+      setDefaultInputs(dut)
+      setInstMetadata(dut, 0x80000000L, PrivMode.M)
+
+      // WFI: 0x10500073
+      dut.io.in.bits.inst.poke(0x10500073L.U)
+
+      dut.io.ifStall.expect(true.B)
+      dut.io.in.ready.expect(false.B)
+    }
+  }
+
+  it should "SFENCE.VMA 指令解析时发出 stall 信号" in {
+    test(new Decoder) { dut =>
+      setDefaultInputs(dut)
+      setInstMetadata(dut, 0x80000000L, PrivMode.M)
+
+      // SFENCE.VMA x1, x2: 0x12000073
+      dut.io.in.bits.inst.poke(0x12000073L.U)
+
+      dut.io.ifStall.expect(true.B)
+      dut.io.in.ready.expect(false.B)
+    }
+  }
+
+  it should "csrPending 为高时发出 stall 信号" in {
+    test(new Decoder) { dut =>
+      setDefaultInputs(dut)
+      setInstMetadata(dut, 0x80000000L, PrivMode.M)
+
+      // 设置 csrPending 为高
+      dut.io.csrPending.poke(true.B)
+
+      // 合法指令
+      dut.io.in.bits.inst.poke(0x003100b3L.U) // ADD x1, x2, x3
+
+      dut.io.ifStall.expect(true.B)
+      dut.io.in.ready.expect(false.B)
+    }
+  }
+
+  it should "flush 拉高时不发出 stall 信号" in {
+    test(new Decoder) { dut =>
+      setDefaultInputs(dut)
+      setInstMetadata(dut, 0x80000000L, PrivMode.M)
+
+      // 设置 globalFlush 为高
+      dut.io.globalFlush.poke(true.B)
+
+      // 合法指令
+      dut.io.in.bits.inst.poke(0x003100b3L.U)
+
+      // flush 时不应该发出 stall 信号
+      dut.io.ifStall.expect(false.B)
+      dut.io.in.ready.expect(false.B)
+      dut.io.renameReq.valid.expect(false.B)
+      dut.io.robInit.valid.expect(false.B)
+      dut.io.dispatch.valid.expect(false.B)
+    }
+  }
+
+  it should "branchFlush 拉高时不发出 stall 信号" in {
+    test(new Decoder) { dut =>
+      setDefaultInputs(dut)
+      setInstMetadata(dut, 0x80000000L, PrivMode.M)
+
+      // 设置 branchFlush 为高
+      dut.io.branchFlush.poke(true.B)
+
+      // 合法指令
+      dut.io.in.bits.inst.poke(0x003100b3L.U)
+
+      // flush 时不应该发出 stall 信号
+      dut.io.ifStall.expect(false.B)
+      dut.io.in.ready.expect(false.B)
+    }
+  }
+
+  it should "同时有 stall 和 flush 时 flush 优先" in {
+    test(new Decoder) { dut =>
+      setDefaultInputs(dut)
+      setInstMetadata(dut, 0x80000000L, PrivMode.M)
+
+      // 设置 ROB 满和 globalFlush
+      dut.io.robInit.ready.poke(false.B)
+      dut.io.globalFlush.poke(true.B)
+
+      // 合法指令
+      dut.io.in.bits.inst.poke(0x003100b3L.U)
+
+      // flush 优先，不应该发出 stall 信号
+      dut.io.ifStall.expect(false.B)
+      dut.io.in.ready.expect(false.B)
+    }
+  }
+
+  it should "同时有 csrPending 和 flush 时 flush 优先" in {
+    test(new Decoder) { dut =>
+      setDefaultInputs(dut)
+      setInstMetadata(dut, 0x80000000L, PrivMode.M)
+
+      // 设置 csrPending 和 branchFlush
+      dut.io.csrPending.poke(true.B)
+      dut.io.branchFlush.poke(true.B)
+
+      // 合法指令
+      dut.io.in.bits.inst.poke(0x003100b3L.U)
+
+      // flush 优先，不应该发出 stall 信号
+      dut.io.ifStall.expect(false.B)
+      dut.io.in.ready.expect(false.B)
+    }
+  }
+
+  it should "正常指令不发出 stall 信号" in {
+    test(new Decoder) { dut =>
+      setDefaultInputs(dut)
+      setInstMetadata(dut, 0x80000000L, PrivMode.M)
+
+      // 合法指令
+      dut.io.in.bits.inst.poke(0x003100b3L.U) // ADD x1, x2, x3
+
+      dut.io.ifStall.expect(false.B)
+      dut.io.in.ready.expect(true.B)
+      dut.io.renameReq.valid.expect(true.B)
+      dut.io.robInit.valid.expect(true.B)
+      dut.io.dispatch.valid.expect(true.B)
+    }
+  }
+
+  it should "输入无效时不发出 stall 信号" in {
+    test(new Decoder) { dut =>
+      setDefaultInputs(dut)
+      setInstMetadata(dut, 0x80000000L, PrivMode.M)
+
+      // 设置输入无效
+      dut.io.in.valid.poke(false.B)
+
+      // 合法指令
+      dut.io.in.bits.inst.poke(0x003100b3L.U)
+
+      dut.io.ifStall.expect(false.B)
+      dut.io.in.ready.expect(true.B)
+      dut.io.renameReq.valid.expect(false.B)
+      dut.io.robInit.valid.expect(false.B)
+      dut.io.dispatch.valid.expect(false.B)
+    }
+  }
+
+  it should "立即数符号扩展正确（I-Type 负数）" in {
+    test(new Decoder) { dut =>
+      setDefaultInputs(dut)
+      setInstMetadata(dut, 0x80000000L, PrivMode.M)
+
+      // ADDI x1, x2, -1: 0xfff09113 (imm[11:0]=0xfff, 符号扩展为 0xffffffff)
+      dut.io.in.bits.inst.poke(0xfff09113L.U)
+
+      dut.io.dispatch.bits.imm.expect(0xffffffffL.U)
+    }
+  }
+
+  it should "立即数符号扩展正确（B-Type 负数）" in {
+    test(new Decoder) { dut =>
+      setDefaultInputs(dut)
+      setInstMetadata(dut, 0x80000000L, PrivMode.M)
+
+      // BEQ x1, x2, -0x10: 0xfe2084e3 (imm=-0x10, 符号扩展为 0xfffffff0)
+      dut.io.in.bits.inst.poke(0xfe2084e3L.U)
+
+      dut.io.dispatch.bits.imm.expect(0xfffffff0L.U)
+    }
+  }
+
+  it should "立即数符号扩展正确（J-Type 负数）" in {
+    test(new Decoder) { dut =>
+      setDefaultInputs(dut)
+      setInstMetadata(dut, 0x80000000L, PrivMode.M)
+
+      // JAL x1, -0x100: 0xff0000ef (imm=-0x100, 符号扩展为 0xffffff00)
+      dut.io.in.bits.inst.poke(0xff0000efL.U)
+
+      dut.io.dispatch.bits.imm.expect(0xffffff00L.U)
+    }
+  }
+
+  it should "立即数符号扩展正确（S-Type 负数）" in {
+    test(new Decoder) { dut =>
+      setDefaultInputs(dut)
+      setInstMetadata(dut, 0x80000000L, PrivMode.M)
+
+      // SW x3, -0x10(x1): 0xfe308423 (imm=-0x10, 符号扩展为 0xfffffff0)
+      dut.io.in.bits.inst.poke(0xfe308423L.U)
+
+      dut.io.dispatch.bits.imm.expect(0xfffffff0L.U)
+    }
+  }
+
+  it should "U-Type 立即数正确左移 12 位" in {
+    test(new Decoder) { dut =>
+      setDefaultInputs(dut)
+      setInstMetadata(dut, 0x80000000L, PrivMode.M)
+
+      // LUI x1, 0x12345: 0x123450b7 (imm[31:12]=0x12345, 左移12位为 0x12345000)
+      dut.io.in.bits.inst.poke(0x123450b7L.U)
+
+      dut.io.dispatch.bits.imm.expect(0x12345000L.U)
+    }
+  }
+
+  it should "Z-Type 立即数正确零扩展" in {
+    test(new Decoder) { dut =>
+      setDefaultInputs(dut)
+      setInstMetadata(dut, 0x80000000L, PrivMode.M)
+
+      // CSRRWI x1, mstatus, 0x1f: 0x31f09173 (uimm=0x1f, 零扩展为 0x0000001f)
+      dut.io.in.bits.inst.poke(0x31f09173L.U)
+
+      dut.io.dispatch.bits.imm.expect(0x1f.U)
+    }
+  }
+}
