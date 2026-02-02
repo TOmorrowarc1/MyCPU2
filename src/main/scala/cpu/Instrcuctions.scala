@@ -87,9 +87,9 @@ object Instructions {
     BitPat("b????????????_?????_100_?????_0010011") -> D(ALUOp.XOR,  Src1Sel.REG,  Src2Sel.IMM,  LSUOp.NOP,   LSUWidth.WORD, LSUsign.UNSIGNED, BRUOp.NOP,  ImmType.I_TYPE, SpecialInstr.NONE,   ZicsrOp.NOP, true), // XORI
     BitPat("b????????????_?????_110_?????_0010011") -> D(ALUOp.OR,   Src1Sel.REG,  Src2Sel.IMM,  LSUOp.NOP,   LSUWidth.WORD, LSUsign.UNSIGNED, BRUOp.NOP,  ImmType.I_TYPE, SpecialInstr.NONE,   ZicsrOp.NOP, true), // ORI
     BitPat("b????????????_?????_111_?????_0010011") -> D(ALUOp.AND,  Src1Sel.REG,  Src2Sel.IMM,  LSUOp.NOP,   LSUWidth.WORD, LSUsign.UNSIGNED, BRUOp.NOP,  ImmType.I_TYPE, SpecialInstr.NONE,   ZicsrOp.NOP, true), // ANDI
-    BitPat("b0000000_?????_001_?????_0010011")      -> D(ALUOp.SLL,  Src1Sel.REG,  Src2Sel.IMM,  LSUOp.NOP,   LSUWidth.WORD, LSUsign.UNSIGNED, BRUOp.NOP,  ImmType.I_TYPE, SpecialInstr.NONE,   ZicsrOp.NOP, true), // SLLI
-    BitPat("b0000000_?????_101_?????_0010011")      -> D(ALUOp.SRL,  Src1Sel.REG,  Src2Sel.IMM,  LSUOp.NOP,   LSUWidth.WORD, LSUsign.UNSIGNED, BRUOp.NOP,  ImmType.I_TYPE, SpecialInstr.NONE,   ZicsrOp.NOP, true), // SRLI
-    BitPat("b0100000_?????_101_?????_0010011")      -> D(ALUOp.SRA,  Src1Sel.REG,  Src2Sel.IMM,  LSUOp.NOP,   LSUWidth.WORD, LSUsign.UNSIGNED, BRUOp.NOP,  ImmType.I_TYPE, SpecialInstr.NONE,   ZicsrOp.NOP, true), // SRAI
+    BitPat("b0000000_?????_?????_001_?????_0010011") -> D(ALUOp.SLL,  Src1Sel.REG,  Src2Sel.IMM,  LSUOp.NOP,   LSUWidth.WORD, LSUsign.UNSIGNED, BRUOp.NOP,  ImmType.I_TYPE, SpecialInstr.NONE,   ZicsrOp.NOP, true), // SLLI
+    BitPat("b0000000_?????_?????_101_?????_0010011") -> D(ALUOp.SRL,  Src1Sel.REG,  Src2Sel.IMM,  LSUOp.NOP,   LSUWidth.WORD, LSUsign.UNSIGNED, BRUOp.NOP,  ImmType.I_TYPE, SpecialInstr.NONE,   ZicsrOp.NOP, true), // SRLI
+    BitPat("b0100000_?????_?????_101_?????_0010011") -> D(ALUOp.SRA,  Src1Sel.REG,  Src2Sel.IMM,  LSUOp.NOP,   LSUWidth.WORD, LSUsign.UNSIGNED, BRUOp.NOP,  ImmType.I_TYPE, SpecialInstr.NONE,   ZicsrOp.NOP, true), // SRAI
     
     // RV32I U-Type (opcode: 0110111, 0010111)
     BitPat("b????????????_?????_0110111")           -> D(ALUOp.ADD,  Src1Sel.ZERO, Src2Sel.IMM,  LSUOp.NOP,   LSUWidth.WORD, LSUsign.UNSIGNED, BRUOp.NOP,  ImmType.U_TYPE, SpecialInstr.NONE,   ZicsrOp.NOP, true), // LUI
