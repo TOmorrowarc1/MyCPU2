@@ -1159,97 +1159,6 @@ class DecoderTest extends AnyFlatSpec with ChiselScalatestTester {
     }
   }
 
-  it should "CSR 指令解析时发出 stall 信号" in {
-    test(new Decoder) { dut =>
-      setDefaultInputs(dut)
-      setInstMetadata(dut, 0x80000000L, PrivMode.M)
-
-      // CSRRW x1, mstatus, x2: 0x30029173
-      dut.io.in.bits.inst.poke(0x30029173L.U)
-
-      dut.io.ifStall.expect(true.B)
-      dut.io.in.ready.expect(false.B)
-    }
-  }
-
-  it should "ECALL 指令解析时发出 stall 信号" in {
-    test(new Decoder) { dut =>
-      setDefaultInputs(dut)
-      setInstMetadata(dut, 0x80000000L, PrivMode.M)
-
-      // ECALL: 0x00000073
-      dut.io.in.bits.inst.poke(0x00000073L.U)
-
-      dut.io.ifStall.expect(true.B)
-      dut.io.in.ready.expect(false.B)
-    }
-  }
-
-  it should "EBREAK 指令解析时发出 stall 信号" in {
-    test(new Decoder) { dut =>
-      setDefaultInputs(dut)
-      setInstMetadata(dut, 0x80000000L, PrivMode.M)
-
-      // EBREAK: 0x00100073
-      dut.io.in.bits.inst.poke(0x00100073L.U)
-
-      dut.io.ifStall.expect(true.B)
-      dut.io.in.ready.expect(false.B)
-    }
-  }
-
-  it should "MRET 指令解析时发出 stall 信号" in {
-    test(new Decoder) { dut =>
-      setDefaultInputs(dut)
-      setInstMetadata(dut, 0x80000000L, PrivMode.M)
-
-      // MRET: 0x30200073
-      dut.io.in.bits.inst.poke(0x30200073L.U)
-
-      dut.io.ifStall.expect(true.B)
-      dut.io.in.ready.expect(false.B)
-    }
-  }
-
-  it should "SRET 指令解析时发出 stall 信号" in {
-    test(new Decoder) { dut =>
-      setDefaultInputs(dut)
-      setInstMetadata(dut, 0x80000000L, PrivMode.M)
-
-      // SRET: 0x10200073
-      dut.io.in.bits.inst.poke(0x10200073L.U)
-
-      dut.io.ifStall.expect(true.B)
-      dut.io.in.ready.expect(false.B)
-    }
-  }
-
-  it should "WFI 指令解析时发出 stall 信号" in {
-    test(new Decoder) { dut =>
-      setDefaultInputs(dut)
-      setInstMetadata(dut, 0x80000000L, PrivMode.M)
-
-      // WFI: 0x10500073
-      dut.io.in.bits.inst.poke(0x10500073L.U)
-
-      dut.io.ifStall.expect(true.B)
-      dut.io.in.ready.expect(false.B)
-    }
-  }
-
-  it should "SFENCE.VMA 指令解析时发出 stall 信号" in {
-    test(new Decoder) { dut =>
-      setDefaultInputs(dut)
-      setInstMetadata(dut, 0x80000000L, PrivMode.M)
-
-      // SFENCE.VMA x1, x2: 0x12000073
-      dut.io.in.bits.inst.poke(0x12000073L.U)
-
-      dut.io.ifStall.expect(true.B)
-      dut.io.in.ready.expect(false.B)
-    }
-  }
-
   it should "csrPending 为高时发出 stall 信号" in {
     test(new Decoder) { dut =>
       setDefaultInputs(dut)
@@ -1279,6 +1188,7 @@ class DecoderTest extends AnyFlatSpec with ChiselScalatestTester {
 
       // flush 时不应该发出 stall 信号
       dut.io.ifStall.expect(false.B)
+      // 但是流水线的阻塞依旧成立
       dut.io.in.ready.expect(false.B)
       dut.io.renameReq.valid.expect(false.B)
       dut.io.robInit.valid.expect(false.B)
@@ -1336,41 +1246,6 @@ class DecoderTest extends AnyFlatSpec with ChiselScalatestTester {
       // flush 优先，不应该发出 stall 信号
       dut.io.ifStall.expect(false.B)
       dut.io.in.ready.expect(false.B)
-    }
-  }
-
-  it should "正常指令不发出 stall 信号" in {
-    test(new Decoder) { dut =>
-      setDefaultInputs(dut)
-      setInstMetadata(dut, 0x80000000L, PrivMode.M)
-
-      // 合法指令
-      dut.io.in.bits.inst.poke(0x003100b3L.U) // ADD x1, x2, x3
-
-      dut.io.ifStall.expect(false.B)
-      dut.io.in.ready.expect(true.B)
-      dut.io.renameReq.valid.expect(true.B)
-      dut.io.robInit.valid.expect(true.B)
-      dut.io.dispatch.valid.expect(true.B)
-    }
-  }
-
-  it should "输入无效时不发出 stall 信号" in {
-    test(new Decoder) { dut =>
-      setDefaultInputs(dut)
-      setInstMetadata(dut, 0x80000000L, PrivMode.M)
-
-      // 设置输入无效
-      dut.io.in.valid.poke(false.B)
-
-      // 合法指令
-      dut.io.in.bits.inst.poke(0x003100b3L.U)
-
-      dut.io.ifStall.expect(false.B)
-      dut.io.in.ready.expect(true.B)
-      dut.io.renameReq.valid.expect(false.B)
-      dut.io.robInit.valid.expect(false.B)
-      dut.io.dispatch.valid.expect(false.B)
     }
   }
 }

@@ -63,6 +63,10 @@ class Decoder extends Module with CPUConfig {
   val isCsr = Wire(Bool())
   val isEcall = Wire(Bool())
   val isEbreak = Wire(Bool())
+  val isMret = Wire(Bool())
+  val isSret = Wire(Bool())
+  val isSFENCE = Wire(Bool())
+  val isWFI = Wire(Bool())
 
   // 立即数
   val imm = Wire(UInt(32.W))
@@ -103,6 +107,10 @@ class Decoder extends Module with CPUConfig {
   isCsr := (specialInstr === SpecialInstr.CSR)
   isEcall := (specialInstr === SpecialInstr.ECALL)
   isEbreak := (specialInstr === SpecialInstr.EBREAK)
+  isMret := (specialInstr === SpecialInstr.MRET)
+  isSret := (specialInstr === SpecialInstr.SRET)
+  isSFENCE := (specialInstr === SpecialInstr.SFENCE)
+  isWFI := (specialInstr === SpecialInstr.WFI)
 
   // ========== 立即数生成 ==========
   // I-Type: imm[11:0] 符号扩展
@@ -198,6 +206,20 @@ class Decoder extends Module with CPUConfig {
     decodeException.valid := true.B
     decodeException.cause := ExceptionCause.BREAKPOINT
     decodeException.tval := pc
+  }.elsewhen(isMret) {
+    // MRET 指令仅允许在特权级别 M 执行
+    when(privMode =/= PrivMode.M) {
+      decodeException.valid := true.B
+      decodeException.cause := ExceptionCause.ILLEGAL_INSTRUCTION
+      decodeException.tval := pc
+    }
+  }.elsewhen(isSret || isSFENCE || isWFI) {
+    // SFENCE.VMA 指令仅允许在特权级别 S 或 M 执行
+    when(privMode === PrivMode.U) {
+      decodeException.valid := true.B
+      decodeException.cause := ExceptionCause.ILLEGAL_INSTRUCTION
+      decodeException.tval := pc
+    }
   }
 
   // 合并输入异常和译码异常
