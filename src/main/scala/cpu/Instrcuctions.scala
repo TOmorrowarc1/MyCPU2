@@ -96,16 +96,16 @@ object Instructions {
     BitPat("b????????????_?????_0010111")           -> D(ALUOp.ADD,  Src1Sel.PC,   Src2Sel.IMM,  LSUOp.NOP,   LSUWidth.WORD, LSUsign.UNSIGNED, BRUOp.NOP,  ImmType.U_TYPE, SpecialInstr.NONE,   ZicsrOp.NOP, true), // AUIPC
     
     // RV32I Load (opcode: 0000011)
-    BitPat("b????????????_?????_000_?????_0000011") -> D(ALUOp.ADD,  Src1Sel.REG,  Src2Sel.IMM,  LSUOp.LOAD,  LSUWidth.BYTE, LSUsign.SIGNED,   BRUOp.NOP,  ImmType.I_TYPE, SpecialInstr.NONE,   ZicsrOp.NOP, true), // LB
-    BitPat("b????????????_?????_001_?????_0000011") -> D(ALUOp.ADD,  Src1Sel.REG,  Src2Sel.IMM,  LSUOp.LOAD,  LSUWidth.HALF, LSUsign.SIGNED,   BRUOp.NOP,  ImmType.I_TYPE, SpecialInstr.NONE,   ZicsrOp.NOP, true), // LH
-    BitPat("b????????????_?????_010_?????_0000011") -> D(ALUOp.ADD,  Src1Sel.REG,  Src2Sel.IMM,  LSUOp.LOAD,  LSUWidth.WORD, LSUsign.SIGNED,   BRUOp.NOP,  ImmType.I_TYPE, SpecialInstr.NONE,   ZicsrOp.NOP, true), // LW
-    BitPat("b????????????_?????_100_?????_0000011") -> D(ALUOp.ADD,  Src1Sel.REG,  Src2Sel.IMM,  LSUOp.LOAD,  LSUWidth.BYTE, LSUsign.UNSIGNED, BRUOp.NOP,  ImmType.I_TYPE, SpecialInstr.NONE,   ZicsrOp.NOP, true), // LBU
-    BitPat("b????????????_?????_101_?????_0000011") -> D(ALUOp.ADD,  Src1Sel.REG,  Src2Sel.IMM,  LSUOp.LOAD,  LSUWidth.HALF, LSUsign.UNSIGNED, BRUOp.NOP,  ImmType.I_TYPE, SpecialInstr.NONE,   ZicsrOp.NOP, true), // LHU
+    BitPat("b????????????_?????_000_?????_0000011") -> D(ALUOp.NOP,  Src1Sel.REG,  Src2Sel.IMM,  LSUOp.LOAD,  LSUWidth.BYTE, LSUsign.SIGNED,   BRUOp.NOP,  ImmType.I_TYPE, SpecialInstr.NONE,   ZicsrOp.NOP, true), // LB
+    BitPat("b????????????_?????_001_?????_0000011") -> D(ALUOp.NOP,  Src1Sel.REG,  Src2Sel.IMM,  LSUOp.LOAD,  LSUWidth.HALF, LSUsign.SIGNED,   BRUOp.NOP,  ImmType.I_TYPE, SpecialInstr.NONE,   ZicsrOp.NOP, true), // LH
+    BitPat("b????????????_?????_010_?????_0000011") -> D(ALUOp.NOP,  Src1Sel.REG,  Src2Sel.IMM,  LSUOp.LOAD,  LSUWidth.WORD, LSUsign.SIGNED,   BRUOp.NOP,  ImmType.I_TYPE, SpecialInstr.NONE,   ZicsrOp.NOP, true), // LW
+    BitPat("b????????????_?????_100_?????_0000011") -> D(ALUOp.NOP,  Src1Sel.REG,  Src2Sel.IMM,  LSUOp.LOAD,  LSUWidth.BYTE, LSUsign.UNSIGNED, BRUOp.NOP,  ImmType.I_TYPE, SpecialInstr.NONE,   ZicsrOp.NOP, true), // LBU
+    BitPat("b????????????_?????_101_?????_0000011") -> D(ALUOp.NOP,  Src1Sel.REG,  Src2Sel.IMM,  LSUOp.LOAD,  LSUWidth.HALF, LSUsign.UNSIGNED, BRUOp.NOP,  ImmType.I_TYPE, SpecialInstr.NONE,   ZicsrOp.NOP, true), // LHU
     
     // RV32I Store (opcode: 0100011)
-    BitPat("b???????_?????_?????_000_?????_0100011") -> D(ALUOp.ADD,  Src1Sel.REG,  Src2Sel.IMM,  LSUOp.STORE, LSUWidth.BYTE, LSUsign.UNSIGNED, BRUOp.NOP,  ImmType.S_TYPE, SpecialInstr.STORE,  ZicsrOp.NOP, true), // SB
-    BitPat("b???????_?????_?????_001_?????_0100011") -> D(ALUOp.ADD,  Src1Sel.REG,  Src2Sel.IMM,  LSUOp.STORE, LSUWidth.HALF, LSUsign.UNSIGNED, BRUOp.NOP,  ImmType.S_TYPE, SpecialInstr.STORE,  ZicsrOp.NOP, true), // SH
-    BitPat("b???????_?????_?????_010_?????_0100011") -> D(ALUOp.ADD,  Src1Sel.REG,  Src2Sel.IMM,  LSUOp.STORE, LSUWidth.WORD, LSUsign.UNSIGNED, BRUOp.NOP,  ImmType.S_TYPE, SpecialInstr.STORE,  ZicsrOp.NOP, true), // SW
+    BitPat("b???????_?????_?????_000_?????_0100011") -> D(ALUOp.NOP,  Src1Sel.REG,  Src2Sel.IMM,  LSUOp.STORE, LSUWidth.BYTE, LSUsign.UNSIGNED, BRUOp.NOP,  ImmType.S_TYPE, SpecialInstr.STORE,  ZicsrOp.NOP, true), // SB
+    BitPat("b???????_?????_?????_001_?????_0100011") -> D(ALUOp.NOP,  Src1Sel.REG,  Src2Sel.IMM,  LSUOp.STORE, LSUWidth.HALF, LSUsign.UNSIGNED, BRUOp.NOP,  ImmType.S_TYPE, SpecialInstr.STORE,  ZicsrOp.NOP, true), // SH
+    BitPat("b???????_?????_?????_010_?????_0100011") -> D(ALUOp.NOP,  Src1Sel.REG,  Src2Sel.IMM,  LSUOp.STORE, LSUWidth.WORD, LSUsign.UNSIGNED, BRUOp.NOP,  ImmType.S_TYPE, SpecialInstr.STORE,  ZicsrOp.NOP, true), // SW
     
     // RV32I Branch (opcode: 1100011)
     BitPat("b???????_?????_?????_000_?????_1100011") -> D(ALUOp.NOP,  Src1Sel.REG,  Src2Sel.REG,  LSUOp.NOP,   LSUWidth.WORD, LSUsign.UNSIGNED, BRUOp.BEQ,  ImmType.B_TYPE, SpecialInstr.BRANCH, ZicsrOp.NOP, true), // BEQ

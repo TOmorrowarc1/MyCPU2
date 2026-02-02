@@ -349,10 +349,14 @@ class DecoderTest extends AnyFlatSpec with ChiselScalatestTester {
       dut.io.in.bits.inst.poke(0x00208463L.U)
 
       dut.io.dispatch.bits.microOp.bruOp.expect(BRUOp.BEQ)
-      dut.io.dispatch.bits.microOp.op1Src.expect(Src1Sel.ZERO)
-      dut.io.dispatch.bits.microOp.op2Src.expect(Src2Sel.FOUR)
-      dut.io.dispatch.bits.imm.expect(0x10L.U)
+      dut.io.dispatch.bits.microOp.aluOp.expect(ALUOp.NOP)
+      dut.io.dispatch.bits.microOp.lsuOp.expect(LSUOp.NOP)
+      dut.io.dispatch.bits.imm.expect(0x8L.U)
+
+      dut.io.renameReq.valid.expect(true.B)
       dut.io.renameReq.bits.isBranch.expect(true.B)
+
+      dut.io.robInit.valid.expect(true.B)
       dut.io.robInit.bits.isSpecialInstr.expect(SpecialInstr.BRANCH)
     }
   }
@@ -426,10 +430,15 @@ class DecoderTest extends AnyFlatSpec with ChiselScalatestTester {
       dut.io.in.bits.inst.poke(0x100000efL.U)
 
       dut.io.dispatch.bits.microOp.bruOp.expect(BRUOp.JAL)
-      dut.io.dispatch.bits.microOp.op1Src.expect(Src1Sel.ZERO)
-      dut.io.dispatch.bits.microOp.op2Src.expect(Src2Sel.FOUR)
+      dut.io.dispatch.bits.microOp.aluOp.expect(ALUOp.NOP)
+      dut.io.dispatch.bits.microOp.lsuOp.expect(LSUOp.NOP)
       dut.io.dispatch.bits.imm.expect(0x100L.U)
+
+      dut.io.renameReq.valid.expect(true.B)
       dut.io.renameReq.bits.isBranch.expect(true.B)
+
+      dut.io.robInit.valid.expect(true.B)
+      dut.io.robInit.bits.isSpecialInstr.expect(SpecialInstr.BRANCH)
     }
   }
 
@@ -438,11 +447,11 @@ class DecoderTest extends AnyFlatSpec with ChiselScalatestTester {
       setDefaultInputs(dut)
       setInstMetadata(dut, 0x80000000L, PrivMode.M)
 
-      // JALR x1, x2, 0x10: 0x004100E7 (imm=0x10, rs1=2, rd=1)
+      // JALR x1, x2, 0x10: 0x004100E7 (imm=0x4, rs1=2, rd=1)
       dut.io.in.bits.inst.poke(0x004100e7L.U)
 
       dut.io.dispatch.bits.microOp.bruOp.expect(BRUOp.JALR)
-      dut.io.dispatch.bits.imm.expect(0x10L.U)
+      dut.io.dispatch.bits.imm.expect(0x4L.U)
       dut.io.renameReq.bits.rs1.expect(2.U)
     }
   }
@@ -456,14 +465,14 @@ class DecoderTest extends AnyFlatSpec with ChiselScalatestTester {
       setDefaultInputs(dut)
       setInstMetadata(dut, 0x80000000L, PrivMode.M)
 
-      // LB x1, 0x10(x2): 0x00410083 (imm=0x10, rs1=2, rd=1)
+      // LB x1, 0x10(x2): 0x00410083 (imm=0x4, rs1=2, rd=1)
       dut.io.in.bits.inst.poke(0x00410083L.U)
 
-      dut.io.dispatch.bits.microOp.aluOp.expect(ALUOp.ADD)
+      dut.io.dispatch.bits.microOp.aluOp.expect(ALUOp.NOP)
       dut.io.dispatch.bits.microOp.lsuOp.expect(LSUOp.LOAD)
       dut.io.dispatch.bits.microOp.lsuWidth.expect(LSUWidth.BYTE)
       dut.io.dispatch.bits.microOp.lsuSign.expect(LSUsign.SIGNED)
-      dut.io.dispatch.bits.imm.expect(0x10L.U)
+      dut.io.dispatch.bits.imm.expect(0x4L.U)
       dut.io.renameReq.bits.rs1.expect(2.U)
       dut.io.renameReq.bits.rd.expect(1.U)
     }
@@ -474,8 +483,8 @@ class DecoderTest extends AnyFlatSpec with ChiselScalatestTester {
       setDefaultInputs(dut)
       setInstMetadata(dut, 0x80000000L, PrivMode.M)
 
-      // LH x1, 0x10(x2): 0x00412083
-      dut.io.in.bits.inst.poke(0x00412083L.U)
+      // LH x1, 0x10(x2): 0x01011083
+      dut.io.in.bits.inst.poke(0x01011083L.U)
 
       dut.io.dispatch.bits.microOp.lsuOp.expect(LSUOp.LOAD)
       dut.io.dispatch.bits.microOp.lsuWidth.expect(LSUWidth.HALF)
@@ -488,8 +497,8 @@ class DecoderTest extends AnyFlatSpec with ChiselScalatestTester {
       setDefaultInputs(dut)
       setInstMetadata(dut, 0x80000000L, PrivMode.M)
 
-      // LW x1, 0x10(x2): 0x00413083
-      dut.io.in.bits.inst.poke(0x00413083L.U)
+      // LW x1, 0x10(x2): 0x00412083
+      dut.io.in.bits.inst.poke(0x00412083L.U)
 
       dut.io.dispatch.bits.microOp.lsuOp.expect(LSUOp.LOAD)
       dut.io.dispatch.bits.microOp.lsuWidth.expect(LSUWidth.WORD)
@@ -530,16 +539,18 @@ class DecoderTest extends AnyFlatSpec with ChiselScalatestTester {
       setDefaultInputs(dut)
       setInstMetadata(dut, 0x80000000L, PrivMode.M)
 
-      // SB x3, 0x10(x1): 0x00308423 (imm=0x10, rs2=3, rs1=1)
+      // SB x3, 0x8(x1): 0x00308423 (imm=0x8, rs2=3, rs1=1)
       dut.io.in.bits.inst.poke(0x00308423L.U)
 
-      dut.io.dispatch.bits.microOp.aluOp.expect(ALUOp.ADD)
+      dut.io.dispatch.bits.microOp.aluOp.expect(ALUOp.NOP)
       dut.io.dispatch.bits.microOp.lsuOp.expect(LSUOp.STORE)
       dut.io.dispatch.bits.microOp.lsuWidth.expect(LSUWidth.BYTE)
       dut.io.dispatch.bits.microOp.lsuSign.expect(LSUsign.UNSIGNED)
-      dut.io.dispatch.bits.imm.expect(0x10L.U)
+      dut.io.dispatch.bits.microOp.bruOp.expect(BRUOp.NOP)
+      dut.io.dispatch.bits.imm.expect(0x8L.U)
       dut.io.renameReq.bits.rs1.expect(1.U)
       dut.io.renameReq.bits.rs2.expect(3.U)
+      dut.io.renameReq.bits.isBranch.expect(false.B)
       dut.io.robInit.bits.isSpecialInstr.expect(SpecialInstr.STORE)
     }
   }
@@ -549,7 +560,7 @@ class DecoderTest extends AnyFlatSpec with ChiselScalatestTester {
       setDefaultInputs(dut)
       setInstMetadata(dut, 0x80000000L, PrivMode.M)
 
-      // SH x3, 0x10(x1): 0x00309423
+      // SH x3, 0x8(x1): 0x00309423
       dut.io.in.bits.inst.poke(0x00309423L.U)
 
       dut.io.dispatch.bits.microOp.lsuOp.expect(LSUOp.STORE)
@@ -562,7 +573,7 @@ class DecoderTest extends AnyFlatSpec with ChiselScalatestTester {
       setDefaultInputs(dut)
       setInstMetadata(dut, 0x80000000L, PrivMode.M)
 
-      // SW x3, 0x10(x1): 0x0030a423
+      // SW x3, 0x8(x1): 0x0030a423
       dut.io.in.bits.inst.poke(0x0030a423L.U)
 
       dut.io.dispatch.bits.microOp.lsuOp.expect(LSUOp.STORE)
@@ -575,8 +586,8 @@ class DecoderTest extends AnyFlatSpec with ChiselScalatestTester {
       setDefaultInputs(dut)
       setInstMetadata(dut, 0x80000000L, PrivMode.M)
 
-      // FENCE: 0x0000000f
-      dut.io.in.bits.inst.poke(0x0000000fL.U)
+      // FENCE: 0x0ff0000f
+      dut.io.in.bits.inst.poke(0x0ff0000fL.U)
 
       dut.io.robInit.bits.isSpecialInstr.expect(SpecialInstr.FENCE)
       dut.io.dispatch.bits.microOp.aluOp.expect(ALUOp.NOP)
@@ -656,13 +667,13 @@ class DecoderTest extends AnyFlatSpec with ChiselScalatestTester {
       setDefaultInputs(dut)
       setInstMetadata(dut, 0x80000000L, PrivMode.M)
 
-      // CSRRWI x1, mstatus, 5: 0x300150F3 (csr=0x300, uimm=5, rd=1)
+      // CSRRWI x1, mstatus, 2: 0x300150F3 (csr=0x300, uimm=5, rd=1)
       dut.io.in.bits.inst.poke(0x300150f3L.U)
 
       dut.io.robInit.bits.isSpecialInstr.expect(SpecialInstr.CSR)
       dut.io.dispatch.bits.microOp.zicsrOp.expect(ZicsrOp.RW)
       dut.io.dispatch.bits.microOp.op1Src.expect(Src1Sel.ZERO)
-      dut.io.dispatch.bits.imm.expect(5.U)
+      dut.io.dispatch.bits.imm.expect(2.U)
     }
   }
 
@@ -671,7 +682,7 @@ class DecoderTest extends AnyFlatSpec with ChiselScalatestTester {
       setDefaultInputs(dut)
       setInstMetadata(dut, 0x80000000L, PrivMode.M)
 
-      // CSRRSI x1, mstatus, 5: 0x300160F3
+      // CSRRSI x1, mstatus, 2: 0x300160F3
       dut.io.in.bits.inst.poke(0x300160f3L.U)
 
       dut.io.robInit.bits.isSpecialInstr.expect(SpecialInstr.CSR)
@@ -684,7 +695,7 @@ class DecoderTest extends AnyFlatSpec with ChiselScalatestTester {
       setDefaultInputs(dut)
       setInstMetadata(dut, 0x80000000L, PrivMode.M)
 
-      // CSRRCI x1, mstatus, 5: 0x300170F3
+      // CSRRCI x1, mstatus, 2: 0x300170F3
       dut.io.in.bits.inst.poke(0x300170f3L.U)
 
       dut.io.robInit.bits.isSpecialInstr.expect(SpecialInstr.CSR)
@@ -710,6 +721,13 @@ class DecoderTest extends AnyFlatSpec with ChiselScalatestTester {
         .expect(ExceptionCause.ECALL_FROM_M_MODE)
       dut.io.robInit.bits.exception.tval.expect(0x80000000L.U)
       dut.io.dispatch.valid.expect(false.B)
+
+      dut.clock.step()
+
+      setInstMetadata(dut, 0x80000004L, PrivMode.U)
+      dut.io.in.bits.inst.poke(0x00000073L.U)
+      dut.io.robInit.bits.exception.cause
+        .expect(ExceptionCause.ECALL_FROM_U_MODE)
     }
   }
 
@@ -786,8 +804,8 @@ class DecoderTest extends AnyFlatSpec with ChiselScalatestTester {
       setDefaultInputs(dut)
       setInstMetadata(dut, 0x80000000L, PrivMode.M)
 
-      // ADDI x1, x2, -1: 0xfff09113 (imm[11:0]=0xfff, 符号扩展为 0xffffffff)
-      dut.io.in.bits.inst.poke(0xfff09113L.U)
+      // ADDI x1, x2, -1: 0xfff10093 (imm[11:0]=0xfff, 符号扩展为 0xffffffff)
+      dut.io.in.bits.inst.poke(0xfff10093L.U)
 
       dut.io.dispatch.bits.imm.expect(0xffffffffL.U)
     }
@@ -798,10 +816,10 @@ class DecoderTest extends AnyFlatSpec with ChiselScalatestTester {
       setDefaultInputs(dut)
       setInstMetadata(dut, 0x80000000L, PrivMode.M)
 
-      // BEQ x1, x2, -0x10: 0xfe2084e3 (imm=-0x10, 符号扩展为 0xfffffff0)
+      // BEQ x1, x2, -0x18: 0xfe2084e3 (imm=-0x18, 符号扩展为 0xfffffff0)
       dut.io.in.bits.inst.poke(0xfe2084e3L.U)
 
-      dut.io.dispatch.bits.imm.expect(0xfffffff0L.U)
+      dut.io.dispatch.bits.imm.expect(0xffffffe8L.U)
     }
   }
 
@@ -810,8 +828,8 @@ class DecoderTest extends AnyFlatSpec with ChiselScalatestTester {
       setDefaultInputs(dut)
       setInstMetadata(dut, 0x80000000L, PrivMode.M)
 
-      // JAL x1, -0x100: 0xff0000ef (imm=-0x100, 符号扩展为 0xffffff00)
-      dut.io.in.bits.inst.poke(0xff0000efL.U)
+      // JAL x1, -0x100: 0xf01ff0ef (imm=-0x100, 符号扩展为 0xffffff00)
+      dut.io.in.bits.inst.poke(0xf01ff0efL.U)
 
       dut.io.dispatch.bits.imm.expect(0xffffff00L.U)
     }
@@ -822,8 +840,8 @@ class DecoderTest extends AnyFlatSpec with ChiselScalatestTester {
       setDefaultInputs(dut)
       setInstMetadata(dut, 0x80000000L, PrivMode.M)
 
-      // SW x3, -0x10(x1): 0xfe308423 (imm=-0x10, 符号扩展为 0xfffffff0)
-      dut.io.in.bits.inst.poke(0xfe308423L.U)
+      // SW x3, -0x10(x1): 0xfe308823 (imm=-0x10, 符号扩展为 0xfffffff0)
+      dut.io.in.bits.inst.poke(0xfe308823L.U)
 
       dut.io.dispatch.bits.imm.expect(0xfffffff0L.U)
     }
@@ -846,8 +864,8 @@ class DecoderTest extends AnyFlatSpec with ChiselScalatestTester {
       setDefaultInputs(dut)
       setInstMetadata(dut, 0x80000000L, PrivMode.M)
 
-      // CSRRWI x1, mstatus, 0x1f: 0x31f09173 (uimm=0x1f, 零扩展为 0x0000001f)
-      dut.io.in.bits.inst.poke(0x31f09173L.U)
+      // CSRRWI x1, mstatus, 0x1f: 0x300fd0f3 (uimm=0x1f, 零扩展为 0x0000001f)
+      dut.io.in.bits.inst.poke(0x300fd0f3L.U)
 
       dut.io.dispatch.bits.imm.expect(0x1f.U)
     }
