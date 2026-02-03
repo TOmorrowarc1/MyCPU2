@@ -25,6 +25,7 @@ trait CPUConfig {
   def CsrAddrW = UInt(CsrAddrWidth.W)
   def RobTag = UInt(RobIdWidth.W)
   def PhyTag = UInt(PhyRegIdWidth.W)
+  def PhyRegMask = UInt((1 << PhyRegIdWidth).W)
   def ArchTag = UInt(ArchRegIdWidth.W)
   def SnapshotId = UInt(SnapshotIdWidth.W)
   def SnapshotMask = UInt((1 << SnapshotIdWidth).W)
