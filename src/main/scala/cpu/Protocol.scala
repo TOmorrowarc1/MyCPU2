@@ -202,7 +202,7 @@ class ROBinitDataPacket extends Bundle with CPUConfig {
 }
 
 // RAT -> Dispatch (重命名结果)
-class RenameResPacket extends Bundle with CPUConfig {
+class RenameRes extends Bundle with CPUConfig {
   val phyRs1 = PhyTag // 源寄存器1 物理号
   val rs1Busy = Bool() // 源寄存器1 是否 Busy (RS 判断是否需要监听 CDB)
   val phyRs2 = PhyTag
@@ -221,7 +221,7 @@ class RenameResPacket extends Bundle with CPUConfig {
 // Dispatch 接口 (组合来自 Decoder, RAT 的信息)
 class DispatchIO extends Bundle with CPUConfig {
   val Decoder = new DispatchPacket
-  val RAT = new RenameResPacket
+  val RAT = new RenameRes
 }
 
 // Dispatch -> RS
@@ -330,4 +330,14 @@ class CDBMessage extends Bundle with CPUConfig {
   val phyRd = PhyTag // 用于 RS 唤醒依赖指令 & PRF 写入
   val data = DataW // 写入 PRF 的数据
   val exception = new Exception // 执行阶段产生的异常
+}
+
+// ============================================================================
+// 6. 提交与状态更新 (ROB & PRF)
+// ============================================================================
+
+class CommitRAT extends Bundle with CPUConfig {
+  val archRd = ArchTag
+  val phyRd = PhyTag
+  val preRd = PhyTag
 }
