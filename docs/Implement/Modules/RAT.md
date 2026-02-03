@@ -10,19 +10,12 @@ RAT (Register Alias Table) 是乱序执行处理器移除 WAR, WAW 冒险的数�
 - **支持分支预测恢复**：通过快照机制，在分支预测失败时快速恢复到分支前的映射状态
 - **高效资源管理**：维护物理寄存器池 (Free List)，动态分配和回收物理寄存器
 
-### 1.2 关键特性
-
-- **双 RAT 结构**：Frontend RAT (推测状态) 和 Retirement RAT (提交状态)
-- **快照机制**：最多支持 4 个分支快照，用于分支预测失败时的快速恢复
-- **双 Free List**：Frontend Free List 和 Retirement Free List，支持推测和提交的独立管理
-- **位矢量表示**：使用位矢量表示物理寄存器的 busy 状态，便于快速查找和分配
-
 ## 2. 职责
 
 1. **寄存器重命名**：为每条指令的目标寄存器分配新的物理寄存器，并更新映射关系
 2. **快照管理**：为分支指令创建快照，保存当前映射状态
 3. **恢复与冲刷**：处理分支预测失败和全局冲刷，恢复映射状态
-4. **资源回收**：回收已提交指令的旧物理寄存器到 Free List
+4. **资源回收与管理**：回收已提交指令的旧物理寄存器到 Free List；每周期更新 Ready List 以反映物理寄存器的数据可用状态。
 
 ## 3. 接口定义
 
@@ -46,6 +39,9 @@ RAT (Register Alias Table) 是乱序执行处理器移除 WAR, WAW 冒险的数�
 | `branchFlush`             | BRU     | `Bool`         | 分支预测失败信号              |
 | `snapshotId`              | BRU     | `SnapshotId`   | 需要恢复的快照 ID             |
 | `branchMask`              | BRU     | `SnapshotMask` | 分支掩码 (用于回收快照)       |
+| **CDB 广播**              |         |                |                               |
+| `cdb.valid`               | CBD     | `Bool`         | CDB 广播有效信号              |
+| `cdb.bits.phyRd`          | CBD     | `PhyTag`       | 广播的物理目标寄存器          |
 
 ### 3.2 输出接口
 
@@ -54,10 +50,10 @@ RAT (Register Alias Table) 是乱序执行处理器移除 WAR, WAW 冒险的数�
 | **Decoder 响应**            |            |                |                                                  |
 | `renameReq.ready`           | Decoder    | `Bool`         | 重命名请求就绪信号                               |
 | `renameRes.valid`           | Decoder/RS | `Bool`         | 重命名结果有效信号                               |
-| `renameRes.bits.phyRs1`     | Decoder/RS | `PhyTag`       | 源寄存器 1 的物理寄存器号                        |
-| `renameRes.bits.rs1Busy`    | Decoder/RS | `Bool`         | 源寄存器 1 是否 busy (需监听 CDB，实现 CDB 旁路) |
-| `renameRes.bits.phyRs2`     | Decoder/RS | `PhyTag`       | 源寄存器 2 的物理寄存器号                        |
-| `renameRes.bits.rs2Busy`    | Decoder/RS | `Bool`         | 源寄存器 2 是否 busy                             |
+| `renameRes.bits.phyRs1`     | Decoder/RS | `PhyTag`       | 源寄存器 1 的物理寄存器号                        |                          |
+| `renameRes.bits.rs1Ready`   | Decoder/RS | `Bool`         | 源寄存器 1 数据是否 ready (用于 CDB 旁路)         |
+| `renameRes.bits.phyRs2`     | Decoder/RS | `PhyTag`       | 源寄存器 2 的物理寄存器号                        |                           |
+| `renameRes.bits.rs2Ready`   | Decoder/RS | `Bool`         | 源寄存器 2 数据是否 ready (用于 CDB 旁路)         |
 | `renameRes.bits.phyRd`      | Decoder/RS | `PhyTag`       | 目标寄存器的物理寄存器号                         |
 | `renameRes.bits.snapshotId` | Decoder/RS | `SnapshotId`   | 分配的快照 ID (分支指令专用)                     |
 | `renameRes.bits.branchMask` | Decoder/RS | `SnapshotMask` | 当前依赖的分支掩码                               |
@@ -87,23 +83,38 @@ val frontendFreeList = RegInit("hFFFFFFFF".U)
 // Retirement Free List: ROB 提交的正被占据的物理寄存器对应 busy 位矢量
 val retirementFreeList = RegInit("hFFFFFFFF".U)
 
-// Snapshot: 保存分支指令时的 RAT 和 Free List 状态
+// Frontend Ready List: 位矢量表示 128 个物理寄存器的 ready 状态
+// 1 表示数据已准备好，0 表示数据未准备好
+val frontendReadyList = RegInit("h00000000".U)
+
+// Snapshot: 保存分支指令时的 RAT、Free List 和 Ready List 状态
 class Snapshot extends Bundle with CPUConfig {
   val rat = Vec(32, PhyTag)           // Frontend RAT 的快照
   val freeList = UInt(128.W)          // Frontend Free List 的快照
-  val branchMask = UInt(4.W)          // 分支掩码快照
+  val readyList = UInt(128.W)         // Frontend Ready List 的快照
+  val snapshotsBusy = UInt(4.W)      // 记录拍下快照时刻的依赖关系
 }
 
 // Snapshots: 4 个快照
 val snapshots = Reg(Vec(4, new Snapshot))
-// 快照忙位，同时作为 BranchMask
-val snapshotsBusy = RegInit(0.U(4.W))  
+// 快照忙位，同时作为 BranchMask（独热码）
+val snapshotsBusy = RegInit(0.U(4.W))
+val snapshotsBusyAfterAlloc = WireDefault(snapshotsBusy)
+val snapshotsBusyAfterCommit = WireDefault(snapshotsBusy)
 
-val nextRetirementFreeLists = WireDefault(retirementFreeList)
-val nextFrontendFreeList = WireDefault(frontendFreeList)
-val nextSnapshotsFreeLists = Wire(Vec(4, UInt(128.W)))
+// 中间组合逻辑变量：区分 Alloc 和 Commit 阶段
+val retirementFreeListAfterCommit = WireDefault(retirementFreeList)
+val retirementRatAfterCommit = WireDefault(retirementRat)
+val frontendFreeListAfterAlloc = WireDefault(frontendFreeList)
+val frontendFreeListAfterCommit = WireDefault(frontendFreeListAfterAlloc)
+val frontendReadyListAfterAlloc = WireDefault(frontendReadyList)
+val frontendReadyListAfterBroadcast = WireDefault(frontendReadyListAfterAlloc)
+val snapshotsFreeListsAfterCommit = Wire(Vec(4, UInt(128.W)))
+val snapshotsReadyListsAfterBroadcast = Wire(Vec(4, UInt(128.W)))
+
 for(i <- 0 until 4) {
-  nextSnapshotsFreeLists(i) := snapshots(i).freeList
+  snapshotsFreeListsAfterCommit(i) := snapshots(i).freeList
+  snapshotsReadyListsAfterBroadcast(i) := snapshots(i).readyList
 }
 ```
 
@@ -119,11 +130,20 @@ val rs2 = renameReq.bits.rs2
 val rd = renameReq.bits.rd
 val isBranch = renameReq.bits.isBranch
 
-// 查找源寄存器的物理寄存器号和 busy 状态
+// 查找源寄存器的物理寄存器号和 busy/ready 状态
 val phyRs1 = frontendRat(rs1)
 val phyRs2 = frontendRat(rs2)
-val rs1Busy = frontendFreeList(phyRs1)
-val rs2Busy = frontendFreeList(phyRs2)
+val rs1Ready = frontendReadyList(phyRs1)
+val rs2Ready = frontendReadyList(phyRs2)
+// CDB bypass forwarding
+when (io.cdb.valid) {
+  when (io.cdb.bits.phyRd === phyRs1 && phyRs1 =/= 0.U) {
+    rs1Ready := true.B
+  }
+  when (io.cdb.bits.phyRd === phyRs2 && phyRs2 =/= 0.U) {
+    rs2Ready := true.B
+  }
+}
 ```
 
 #### 4.2.2 新物理寄存器分配
@@ -140,10 +160,8 @@ val hasFree = (~frontendFreeList).orR
 // 如果 rd != x0 且有 free 物理寄存器，则分配
 when (rd =/= 0.U && hasFree) {
   allocPhyRd := freeIndex
-  allocSuccess := true.B
 }.otherwise {
   allocPhyRd := 0.U // 如果没有空闲，使用 x0（毕竟不会 valid）
-  allocSuccess := (rd === 0.U)  // x0 总是成功
 }
 ```
 
@@ -151,17 +169,18 @@ when (rd =/= 0.U && hasFree) {
 
 ```scala
 // 更新 Frontend RAT
-when (renameReq.fire && rd =/= 0.U && allocSuccess) {
+when (renameReq.fire && rd =/= 0.U) {
   frontendRat(rd) := allocPhyRd
 }
 ```
 
-#### 4.2.4 更新 Free List
+#### 4.2.4 更新 Free List 与 Ready List
 
 ```scala
-// 更新 Free List
-when (renameReq.fire && rd =/= 0.U && allocSuccess) {
-  nextFrontendFreeList := frontendFreeList | (1.U(128.W) << allocPhyRd)
+// 预计算分配后的 FreeList 与 ReadyList
+when(renameReq.fire && rd =/= 0.U) {
+  frontendFreeListAfterAlloc := frontendFreeList | (1.U(128.W) << allocPhyRd)
+  frontendReadyListAfterAlloc := frontendReadyList & ~(1.U(128.W) << allocPhyRd)
 }
 ```
 
@@ -171,9 +190,9 @@ when (renameReq.fire && rd =/= 0.U && allocSuccess) {
 // 输出重命名结果
 io.renameRes.valid := allocSuccess && renameReq.valid
 io.renameRes.bits.phyRs1 := phyRs1
-io.renameRes.bits.rs1Busy := rs1Busy
+io.renameRes.bits.rs1Ready := rs1Ready
 io.renameRes.bits.phyRs2 := phyRs2
-io.renameRes.bits.rs2Busy := rs2Busy
+io.renameRes.bits.rs2Ready := rs2Ready
 io.renameRes.bits.phyRd := allocPhyRd
 io.renameRes.bits.branchMask := currentBranchMask
 ```
@@ -183,28 +202,30 @@ io.renameRes.bits.branchMask := currentBranchMask
 #### 4.3.1 快照分配
 
 ```scala
-val currentBranchMask = snapshotsBusy
-val snapshotId = PriorityEncoder(~snapshotsBusy)
+// 独热码快照分配逻辑
+val allocSnapshotOH = PriorityEncoderOH(~snapshotsBusy) // 找出第一个 0 位，返回独热码
 val hasSnapshotFree = (~snapshotsBusy).orR
+val currentBranchMask = snapshotsBusy
 
-// 更新快照
-when (renameReq.fire && isBranch && hasSnapshotFree) {
-  // 保存当前 Frontend RAT
-  snapshots(snapshotId).rat := frontendRat
-  // 保存当前 Free List
-  snapshots(snapshotId).freeListBusy := freeListBusy
-  // 保存当前分支掩码
-  snapshots(snapshotId).branchMask := currentBranchMask
-  // 标记快照有效，即更新当前分支掩码
-  snapshotsBusy := snapshotsBusy | (1.U(4.W) << snapshotId)
+// 拍摄快照
+when(renameReq.fire && isBranch && hasSnapshotFree) {
+  for (i <- 0 until 4) {
+    when(allocSnapshotOH(i)) {
+      snapshots(i).rat := frontendRat
+      snapshots(i).freeList := frontendFreeListAfterCommit
+      snapshots(i).readyList := frontendReadyListAfterBroadcast
+      snapshots(i).snapshotsBusy := snapshotsBusy // 记录当前已存在的快照依赖
+    }
+  }
+  snapshotsBusyAfterAlloc := snapshotsBusy | allocSnapshotOH
 }
 ```
 
 #### 4.3.2 输出快照 ID
 
 ```scala
-// 输出快照 ID
-io.renameRes.bits.snapshotId := Mux(isBranch, snapshotId, 0.U)
+// 输出快照 ID（独热码）
+io.renameRes.bits.snapshotId := Mux(isBranch, allocSnapshotOH, 0.U)
 
 // 判定 RAT 是否 ready
 io.renameReq.ready := hasFree && hasSnapshotFree
@@ -213,64 +234,79 @@ io.renameReq.ready := hasFree && hasSnapshotFree
 ### 4.4 回收与冲刷逻辑
 
 * 每次 ROB 提交时，对应旧物理寄存器被回收，所有 Free list（包括 Snapshots 中）中对应位都应当被清空。
+* 每次 CDB 提交时，对应物理寄存器在包括 Snapshots 中所有 Ready lists 中被标记为 ready。
 * 冲刷时 branchFlush 不影响当前提交更新，但是 globalFlush 会覆盖当前更新，即 branchFlush 时先提交后冲刷，但是 globalFlush 直接覆盖。
 
-#### 4.4.1 ROB 提交回收
+#### 4.4.1 CDB Ready List 更新
+
+```scala
+// CDB 广播: 将 phyRd 标记为 ready，更新所有 Ready List
+when(io.cdb.valid && io.cdb.bits.phyRd =/= 0.U) {
+  val mask = (1.U(128.W) << io.cdb.bits.phyRd)
+  // 更新 Frontend Ready List（基于 AfterAlloc）
+  frontendReadyListAfterBroadcast := frontendReadyListAfterAlloc | mask
+  // 更新所有快照的 Ready List
+  for(i <- 0 until 4) {
+    snapshotsReadyListsAfterBroadcast(i) := snapshots(i).readyList | mask
+  }
+}
+```
+
+#### 4.4.2 ROB 提交回收
 
 ```scala
 // ROB 提交: 将 PreRd 回收到 Free List，更新 Retirement RAT
 when(io.commit.valid && io.commit.bits.preRd =/= 0.U) {
   val mask = ~(1.U(128.W) << io.commit.bits.preRd)
   for(i <- 0 until 4) {
-    nextSnapshotsFreeLists(i) := snapshots(i).freeList & mask
+    snapshotsFreeListsAfterCommit(i) := snapshots(i).freeList & mask
   }
-  nextFrontendFreeList := nextFrontendFreeList & mask
-  nextRetirementFreeLists := nextRetirementFreeList & mask
+  frontendFreeListAfterCommit := frontendFreeListAfterAlloc & mask
+  retirementFreeListsAfterCommit := retirementFreeList & mask
 }
 
-val nextRetirementRat := WireDefault(retirementRat)
-when (io.commit.valid) {
-  val archRd = io.commit.bits.archRd
-  val phyRd = io.commit.bits.phyRd  
-  // 更新 Retirement RAT
-  when (archRd =/= 0.U) {
-    nextRetirementRat(archRd) := phyRd
-  }
+when(io.commit.valid && io.commit.bits.archRd =/= 0.U) {
+  retirementRatAfterCommit(io.commit.bits.archRd) := io.commit.bits.phyRd
 }
 ```
 
 #### 4.4.2 Global Flush 与 Branch Flush/分支回收
 
 ```scala
-// Global Flush: 直接将 Frontend RAT 覆盖为 Retirement RAT，回收所有 Snapshots，本周期 ROB 更新弃置不用。
-when (io.globalFlush) {
+when(io.globalFlush) {
   // 恢复 Frontend RAT
   frontendRat := retirementRat
   // 恢复 Free List
   frontendFreeList := retirementFreeList
   // 清空所有快照
   snapshotsBusy := 0.U
-}
-.otherwise{
-  val snapshotId = io.snapshotId
-  when(io.branchFlush){
-    // 恢复 Frontend RAT
-    frontendRat := snapshots(snapshotId).rat
-    // 恢复 Free List，接受本周期 ROB 更新
-    frontendFreeList := nextSnapshotsFreeLists(snapshotId)
-    // 恢复分支掩码
-    snapshotsBusy := snapshots(snapshotId).snapshotsBusy
-  }.elsewhen(snapshotId =/= 0.U){
-    // 清空该快照
-    snapshotsBusy := snapshotsBusy & ~(1.U(128.W) << snapshotId)
-    // 更新分支掩码
-    currentBranchMask := currentBranchMask & ~(1.U(128.W) << snapshotId)
+}.otherwise {
+  // 默认行为：接受提交更新
+  retirementRat := retirementRatAfterCommit
+  retirementFreeList := retirementFreeListAfterCommit
+  for (i <- 0 until 4) {
+    snapshots(i).freeList := snapshotsFreeListsAfterCommit(i)
+    snapshots(i).readyList := snapshotsReadyListsAfterBroadcast(i)
   }
-  // ROB 提交更新采用
-  retirementRat := nextretirementRat
-  retirementFreeList := nextRetirementFreeLists
-  for(i <- 0 until 4) {
-    snapshots(i).freeList := nextSnapshotsFreeLists(i)
+  // Branch Flush 与 Branch 回收
+  when(io.branchFlush) {
+    // 1. 分支预测失败恢复
+    // 使用 Mux1H 快速选择独热码对应的快照状态
+    frontendRat := Mux1H(io.snapshotId, snapshots.map(_.rat))
+    frontendFreeList := Mux1H(io.snapshotId,snapshotsFreeListsAfterCommit)
+    frontendReadyList := Mux1H(io.snapshotId, snapshotsReadyListsAfterBroadcast)
+    // 恢复到该分支点时的快照占用状态（即该分支之前的快照仍然有效）
+    snapshotsBusy := Mux1H(io.snapshotId, snapshots.map(_.snapshotsBusy))
+  }.otherwise {
+    // 2. 正常运行逻辑
+    // 只有在无 Flush 的情况下才从分配上更新 Frontend RAT
+    when(renameReq.fire && rd =/= 0.U) { frontendRat(rd) := allocPhyRd }
+    frontendFreeList := frontendFreeListAfterCommit
+    frontendReadyList := frontendReadyListAfterBroadcast
+    when(io.branchMask =/= 0.U) {
+      snapshotsBusyAfterCommit := snapshotsBusyAfterAlloc & ~io.snapshotId
+    }
+    snapshotsBusy := snapshotsBusyAfterCommit
   }
 }
 ```
@@ -292,17 +328,18 @@ io.robData.bits.branchMask := currentBranchMask
 
 - 测试不同类型的指令重命名
 - 测试源寄存器 busy 状态的正确性
+- 测试源寄存器 ready 状态的正确性
 - 测试目标寄存器分配的正确性
 
 ### 5.2 分支快照测试
 
 - 测试分支指令的快照分配
-- 测试快照内容的正确性
+- 测试快照内容的正确性（包括 Ready List）
 - 测试分支掩码的更新
 
 ### 5.3 分支预测失败恢复测试
 
-- 测试快照恢复的正确性
+- 测试快照恢复的正确性（包括 Ready List 恢复）
 - 测试分支掩码的更新
 - 测试不再需要的快照回收
 
@@ -310,6 +347,7 @@ io.robData.bits.branchMask := currentBranchMask
 
 - 测试 Frontend RAT 恢复到 Retirement RAT
 - 测试 Free List 的恢复
+- 测试 Ready List 的清空
 - 测试所有快照的清空
 
 ### 5.5 资源回收测试
@@ -317,3 +355,9 @@ io.robData.bits.branchMask := currentBranchMask
 - 测试 ROB 提交时的物理寄存器回收
 - 测试分支预测成功时的快照回收
 - 测试 Free List 的正确更新
+
+### 5.6 CDB Ready List 更新测试
+
+- 测试 CDB 广播时 Ready List 的正确更新
+- 测试所有快照的 Ready List 同步更新
+- 测试 Ready List 与 Free List 的独立性

@@ -33,7 +33,7 @@
     *   向 Fetcher 发送 `IFStall` 信号。
 
 ### 1.3 RAT (Register Alias Table)
-*   **职责**：维护如下**架构寄存器->物理寄存器**映射 -- Frontend RAT (推断状态), Retirement RAT (提交状态), 最多 4 个 SnapShots ；维护 Free List (物理寄存器池，使用位矢量表示 busy 部分) 以及 Retirement Free List (ROB 提交的正被占据的物理寄存器对应 busy 位矢量)，4 个 Snapshots 中各有一份 Free List；重命名之后将对应数据（操作数对应立即数或寄存器，valid 位）送入 RS。
+*   **职责**：维护如下**架构寄存器->物理寄存器**映射 -- Frontend RAT (推断状态), Retirement RAT (提交状态), 最多 4 个 SnapShots；维护 Free List (物理寄存器池，使用位矢量表示 busy 部分) 以及 Retirement Free List (ROB 提交的正被占据的物理寄存器对应 busy 位矢量)，4 个 Snapshots 中各有一份 Free List；维护 Ready List，与 Free lists 类似但是表示数据可用的寄存器 (Retirement Ready List 恒为全 1)。重命名之后将对应数据（操作数对应立即数或寄存器，valid 位）送入 RS。
 *   **输入**：来自 Decoder 的 `{Data, IsBranch}` 请求；来自 ROB 的 `{CommitPreRd, CommitPhyRd, GlobalFlush}`；来自 BRU 的 `{BranchFlush, SnapshotID, BranchMask}`。
 *   **逻辑简述**：
     *   **重命名**：接受 Decoder 请求时执行：
@@ -43,7 +43,7 @@
     *   **恢复与冲刷**：
         *   **Global Flush**：直接将 Frontend RAT 覆盖为 Retirement RAT，回收所有 Snapshots。
         *   **Branch Mispredict**：通过 `SnapshotID` 瞬间恢复 Frontend RAT，同时根据 `branch_mask` 回收不再需要的 Snapshots。
-    *   **正常回收**：将 ROB 提交阶段发回的 `PreRd` 回收进 Free List；将 BRU 传来的预测成功分支（SnapshotID 非 0，但 BranchFlush 为 0）对应的 Snapshot 回收。
+    *   **正常回收**：将 ROB 提交阶段发回的 `PreRd` 回收进 Free List；将 BRU 传来的预测成功分支（SnapshotID 非 0，但 BranchFlush 为 0）对应的 Snapshot 回收。同时将 CDB 广播发回的 `Rd` 回收进 Ready List。
         > 以上内容中回收的含义为将 busy 位置 0，表示该物理资源可再分配使用。
 *   **输出**：
     *   向 ROB 发送 `{LogicRd, PhyRd, PreRd, BranchMask}`。

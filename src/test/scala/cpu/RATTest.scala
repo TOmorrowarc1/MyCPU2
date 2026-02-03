@@ -4,6 +4,7 @@ import chisel3._
 import chisel3.util._
 import chiseltest._
 import org.scalatest.flatspec.AnyFlatSpec
+import os.group.set
 
 class RATTest extends AnyFlatSpec with ChiselScalatestTester {
 
@@ -49,8 +50,21 @@ class RATTest extends AnyFlatSpec with ChiselScalatestTester {
       for (i <- 0 until 32) {
         // 由于我们无法直接访问内部寄存器，这里我们通过重命名请求来验证
         // 初始状态下，架构寄存器 i 应该映射到物理寄存器 i
+        setRenameReq(dut, rs1 = i, rs2 = 0, rd = 0, isBranch = false)
+        dut.io.renameRes.bits.phyRs1.expect(i.U)
+        dut.clock.step()
       }
 
+      dut.io.globalFlush.poke(true.B)
+      dut.clock.step()
+      
+      for(i <- 0 until 32) {
+        // 验证 Global Flush 后 Retirement RAT 状态正确
+        setRenameReq(dut, rs1 = i, rs2 = 0, rd = 0, isBranch = false)
+        dut.io.renameRes.bits.phyRs1.expect(i.U)
+        dut.clock.step()
+      }
+      
       // 检查 ready 信号（初始应该为 true，因为有足够的物理寄存器和快照）
       dut.io.renameReq.ready.expect(true.B)
     }

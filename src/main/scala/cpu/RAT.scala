@@ -19,6 +19,11 @@ class RAT extends Module with CPUConfig {
     val snapshotId = Input(UInt(4.W)) // 现在是独热码掩码或全 0
     val branchMask = Input(UInt(4.W))
 
+    // CDB 广播
+    val cdb = Flipped(Decoupled(new Bundle {
+      val phyRd = PhyTag
+    }))
+
     // 输出到 RS 的重命名结果
     val renameRes = Decoupled(new RenameRes)
 
@@ -42,10 +47,15 @@ class RAT extends Module with CPUConfig {
   // Retirement Free List: ROB 提交的正被占据的物理寄存器对应 busy 位矢量
   val retirementFreeList = RegInit("hFFFFFFFF".U(128.W))
 
-  // Snapshot: 保存分支指令时的 RAT 和 Free List 状态
+  // Frontend Ready List: 位矢量表示 128 个物理寄存器的 ready 状态
+  // 1 表示数据已准备好，0 表示数据未准备好
+  val frontendReadyList = RegInit("h00000000".U(128.W))
+
+  // Snapshot: 保存分支指令时的 RAT、Free List 和 Ready List 状态
   class Snapshot extends Bundle with CPUConfig {
     val rat = Vec(32, PhyTag)
     val freeList = UInt(128.W)
+    val readyList = UInt(128.W) // Frontend Ready List 的快照
     val snapshotsBusy = UInt(4.W) // 记录拍下快照时刻的依赖关系
   }
 
@@ -60,9 +70,13 @@ class RAT extends Module with CPUConfig {
   val retirementFreeListAfterCommit = WireDefault(retirementFreeList)
   val frontendFreeListAfterAlloc = WireDefault(frontendFreeList)
   val frontendFreeListAfterCommit = WireDefault(frontendFreeListAfterAlloc)
+  val frontendReadyListAfterAlloc = WireDefault(frontendReadyList)
+  val frontendReadyListAfterBroadcast = WireDefault(frontendReadyListAfterAlloc)
   val snapshotsFreeListsAfterCommit = Wire(Vec(4, UInt(128.W)))
+  val snapshotsReadyListsAfterBroadcast = Wire(Vec(4, UInt(128.W)))
   for (i <- 0 until 4) {
     snapshotsFreeListsAfterCommit(i) := snapshots(i).freeList
+    snapshotsReadyListsAfterBroadcast(i) := snapshots(i).readyList
   }
   val retirementRatAfterCommit = WireDefault(retirementRat)
 
@@ -74,11 +88,20 @@ class RAT extends Module with CPUConfig {
   val rd = renameReq.bits.rd
   val isBranch = renameReq.bits.isBranch
 
-  // 查找源寄存器的物理寄存器号和 busy 状态
+  // 查找源寄存器的物理寄存器号和 ready 状态
   val phyRs1 = frontendRat(rs1)
   val phyRs2 = frontendRat(rs2)
-  val rs1Busy = frontendFreeList(phyRs1)
-  val rs2Busy = frontendFreeList(phyRs2)
+  val rs1Ready = frontendReadyList(phyRs1)
+  val rs2Ready = frontendReadyList(phyRs2)
+  // CDB bypass forwarding
+  when (io.cdb.valid) {
+    when (io.cdb.bits.phyRd === phyRs1 && phyRs1 =/= 0.U) {
+      rs1Ready := true.B
+    }
+    when (io.cdb.bits.phyRd === phyRs2 && phyRs2 =/= 0.U) {
+      rs2Ready := true.B
+    }
+  }
 
   // 分配逻辑
   val allocPhyRd = WireDefault(0.U(PhyRegIdWidth.W))
@@ -95,9 +118,10 @@ class RAT extends Module with CPUConfig {
     allocPhyRd := 0.U
   }
 
-  // 预计算分配后的 FreeList
+  // 预计算分配后的 FreeList 与 ReadyList
   when(renameReq.fire && rd =/= 0.U) {
     frontendFreeListAfterAlloc := frontendFreeList | (1.U(128.W) << allocPhyRd)
+    frontendReadyListAfterAlloc := frontendReadyList & ~(1.U(128.W) << allocPhyRd)
   }
 
   // 3. 独热码快照分配逻辑
@@ -111,6 +135,7 @@ class RAT extends Module with CPUConfig {
       when(allocSnapshotOH(i)) {
         snapshots(i).rat := frontendRat
         snapshots(i).freeList := frontendFreeListAfterCommit
+        snapshots(i).readyList := frontendReadyListAfterBroadcast
         snapshots(i).snapshotsBusy := snapshotsBusy // 记录当前已存在的快照依赖
       }
     }
@@ -132,6 +157,17 @@ class RAT extends Module with CPUConfig {
     retirementRatAfterCommit(io.commit.bits.archRd) := io.commit.bits.phyRd
   }
 
+  // CDB 广播: 将 phyRd 标记为 ready，更新所有 Ready List
+  when(io.cdb.valid && io.cdb.bits.phyRd =/= 0.U) {
+    val mask = (1.U(128.W) << io.cdb.bits.phyRd)
+    // 更新 Frontend Ready List（基于 AfterAlloc）
+    frontendReadyListAfterBroadcast := frontendReadyListAfterAlloc | mask
+    // 更新所有快照的 Ready List
+    for(i <- 0 until 4) {
+      snapshotsReadyListsAfterBroadcast(i) := snapshots(i).readyList | mask
+    }
+  }
+
   // 状态更新优先级链
   when(io.globalFlush) {
     // 恢复 Frontend RAT
@@ -146,6 +182,7 @@ class RAT extends Module with CPUConfig {
     retirementFreeList := retirementFreeListAfterCommit
     for (i <- 0 until 4) {
       snapshots(i).freeList := snapshotsFreeListsAfterCommit(i)
+      snapshots(i).readyList := snapshotsReadyListsAfterBroadcast(i)
     }
     // Branch Flush 与 Branch 回收
     when(io.branchFlush) {
@@ -153,6 +190,7 @@ class RAT extends Module with CPUConfig {
       // 使用 Mux1H 快速选择独热码对应的快照状态
       frontendRat := Mux1H(io.snapshotId, snapshots.map(_.rat))
       frontendFreeList := Mux1H(io.snapshotId, snapshotsFreeListsAfterCommit)
+      frontendReadyList := Mux1H(io.snapshotId, snapshotsReadyListsAfterBroadcast)
       // 恢复到该分支点时的快照占用状态（即该分支之前的快照仍然有效）
       snapshotsBusy := Mux1H(io.snapshotId, snapshots.map(_.snapshotsBusy))
     }.otherwise {
@@ -160,6 +198,7 @@ class RAT extends Module with CPUConfig {
       // 只有在无 Flush 的情况下才从分配上更新 Frontend RAT
       when(renameReq.fire && rd =/= 0.U) { frontendRat(rd) := allocPhyRd }
       frontendFreeList := frontendFreeListAfterCommit
+      frontendReadyList := frontendReadyListAfterBroadcast
       when(io.branchMask =/= 0.U) {
         snapshotsBusyAfterCommit := snapshotsBusyAfterAlloc & ~io.snapshotId
       }
@@ -170,9 +209,9 @@ class RAT extends Module with CPUConfig {
   // 5. 输出接口
   io.renameRes.valid := renameReq.fire
   io.renameRes.bits.phyRs1 := phyRs1
-  io.renameRes.bits.rs1Busy := rs1Busy
+  io.renameRes.bits.rs1Ready := rs1Ready
   io.renameRes.bits.phyRs2 := phyRs2
-  io.renameRes.bits.rs2Busy := rs2Busy
+  io.renameRes.bits.rs2Ready := rs2Ready
   io.renameRes.bits.phyRd := allocPhyRd
   // 发送给后端的 ID 也是独热码
   io.renameRes.bits.snapshotId := Mux(isBranch, allocSnapshotOH, 0.U)
@@ -187,4 +226,5 @@ class RAT extends Module with CPUConfig {
   io.robData.bits.branchMask := currentBranchMask
 
   io.commit.ready := true.B
+  io.cdb.ready := true.B
 }

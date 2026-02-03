@@ -204,9 +204,9 @@ class ROBinitDataPacket extends Bundle with CPUConfig {
 // RAT -> Dispatch (重命名结果)
 class RenameRes extends Bundle with CPUConfig {
   val phyRs1 = PhyTag // 源寄存器1 物理号
-  val rs1Busy = Bool() // 源寄存器1 是否 Busy (RS 判断是否需要监听 CDB)
+  val rs1Ready = Bool() // 源寄存器1 数据是否 ready (用于 CDB 旁路)
   val phyRs2 = PhyTag
-  val rs2Busy = Bool()
+  val rs2Ready = Bool() // 源寄存器2 数据是否 ready (用于 CDB 旁路)
   val phyRd = PhyTag // 目标寄存器 物理号
   val snapshotId = SnapshotId // 分配的快照 ID (分支专用)
   val branchMask = SnapshotMask // 当前依赖的分支掩码
