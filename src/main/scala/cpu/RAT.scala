@@ -185,4 +185,6 @@ class RAT extends Module with CPUConfig {
   io.robData.bits.phyRd := allocPhyRd
   io.robData.bits.phyOld := frontendRat(rd)
   io.robData.bits.branchMask := currentBranchMask
+
+  io.commit.ready := true.B
 }
