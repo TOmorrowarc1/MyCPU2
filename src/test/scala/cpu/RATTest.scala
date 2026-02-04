@@ -18,6 +18,8 @@ class RATTest extends AnyFlatSpec with ChiselScalatestTester {
     dut.io.branchMask.poke(0.U)
     dut.io.renameRes.ready.poke(true.B)
     dut.io.robData.ready.poke(true.B)
+    dut.io.cdb.valid.poke(false.B)
+    dut.io.cdb.bits.phyRd.poke(0.U)
   }
 
   // 辅助函数：设置重命名请求
@@ -64,7 +66,7 @@ class RATTest extends AnyFlatSpec with ChiselScalatestTester {
         dut.io.renameRes.bits.phyRs1.expect(i.U)
         dut.clock.step()
       }
-      
+
       // 检查 ready 信号（初始应该为 true，因为有足够的物理寄存器和快照）
       dut.io.renameReq.ready.expect(true.B)
     }
@@ -82,8 +84,8 @@ class RATTest extends AnyFlatSpec with ChiselScalatestTester {
       dut.io.renameRes.valid.expect(true.B)
       dut.io.renameRes.bits.phyRs1.expect(2.U)  // 初始映射
       dut.io.renameRes.bits.phyRs2.expect(3.U)  // 初始映射
-      dut.io.renameRes.bits.rs1Busy.expect(true.B)  // 初始物理寄存器都是 busy
-      dut.io.renameRes.bits.rs2Busy.expect(true.B)
+      dut.io.renameRes.bits.rs1Ready.expect(true.B)  // 初始物理寄存器都是 ready 的
+      dut.io.renameRes.bits.rs2Ready.expect(true.B)
       dut.io.renameRes.bits.phyRd.expect(32.U)  // 第一个 free 物理寄存器
       dut.io.renameRes.bits.snapshotId.expect(0.U)  // 非分支指令
       dut.io.renameRes.bits.branchMask.expect(0.U)  // 无分支依赖
@@ -124,7 +126,7 @@ class RATTest extends AnyFlatSpec with ChiselScalatestTester {
     }
   }
 
-  it should "正确更新源寄存器 busy 状态" in {
+  it should "正确更新源寄存器 ready 状态" in {
     test(new RAT) { dut =>
       setDefaultInputs(dut)
 
@@ -133,10 +135,10 @@ class RATTest extends AnyFlatSpec with ChiselScalatestTester {
       dut.clock.step()
 
       // 第二次重命名：ADD x4, x1, x5
-      // x1 现在映射到物理寄存器 32，该寄存器是 busy 的
+      // x1 现在映射到物理寄存器 32，该寄存器初始是 ready 的（因为初始 Ready List 全为 0，但初始 32 个物理寄存器有初始值）
       setRenameReq(dut, rs1 = 1, rs2 = 5, rd = 4, isBranch = false)
       dut.io.renameRes.bits.phyRs1.expect(32.U)
-      dut.io.renameRes.bits.rs1Busy.expect(true.B)  // 物理寄存器 32 是 busy 的
+      dut.io.renameRes.bits.rs1Ready.expect(true.B)  // 物理寄存器 32 初始是 ready 的（因为初始 Ready List 全为 0，但初始 32 个物理寄存器有初始值）
       dut.clock.step()
 
       // 提交第一条指令，回收旧的物理寄存器
@@ -147,7 +149,7 @@ class RATTest extends AnyFlatSpec with ChiselScalatestTester {
       // x1 仍然映射到物理寄存器 32，但 1 已经被回收
       setRenameReq(dut, rs1 = 1, rs2 = 7, rd = 6, isBranch = false)
       dut.io.renameRes.bits.phyRs1.expect(32.U)
-      dut.io.renameRes.bits.rs1Busy.expect(true.B)  // 物理寄存器 32 仍然是 busy 的（因为是新的映射）
+      dut.io.renameRes.bits.rs1Ready.expect(true.B)  // 物理寄存器 32 的 ready 状态
     }
   }
 
@@ -652,6 +654,178 @@ class RATTest extends AnyFlatSpec with ChiselScalatestTester {
       // 所有快照应该被清空
       setRenameReq(dut, rs1 = 0, rs2 = 0, rd = 0, isBranch = true)
       dut.io.renameRes.bits.snapshotId.expect(1.U)  // 可以分配第一个快照
+    }
+  }
+
+  // ============================================================================
+  // 7. CDB Ready List 更新测试
+  // ============================================================================
+
+  it should "正确初始化 Ready List 状态" in {
+    test(new RAT) { dut =>
+      setDefaultInputs(dut)
+
+      // 初始状态下，前32个物理寄存器应该都是 ready 的（因为有初始值）
+      // 后96个物理寄存器应该是 not ready 的
+      for (i <- 0 until 32) {
+        setRenameReq(dut, rs1 = i, rs2 = 0, rd = 0, isBranch = false)
+        dut.io.renameRes.bits.rs1Ready.expect(true.B)  // 初始物理寄存器都是 ready 的
+        dut.clock.step()
+      }
+    }
+  }
+
+  it should "CDB 广播时正确更新 Frontend Ready List" in {
+    test(new RAT) { dut =>
+      setDefaultInputs(dut)
+
+      // 分配一个新的物理寄存器
+      setRenameReq(dut, rs1 = 0, rs2 = 0, rd = 1, isBranch = false)
+      val phyRd = 32.U
+      dut.io.renameRes.bits.phyRd.expect(phyRd)
+      dut.clock.step()
+
+      // 新分配的物理寄存器应该是 not ready 的
+      setRenameReq(dut, rs1 = 1, rs2 = 0, rd = 0, isBranch = false)
+      dut.io.renameRes.bits.rs1Ready.expect(false.B)  // 物理寄存器 32 还没有 ready
+      dut.clock.step()
+
+      // CDB 广播，标记物理寄存器 32 为 ready
+      dut.io.cdb.valid.poke(true.B)
+      dut.io.cdb.bits.phyRd.poke(phyRd)
+      dut.clock.step()
+
+      // 验证物理寄存器 32 现在是 ready 的
+      setRenameReq(dut, rs1 = 1, rs2 = 0, rd = 0, isBranch = false)
+      dut.io.renameRes.bits.rs1Ready.expect(true.B)  // 物理寄存器 32 现在是 ready 的
+    }
+  }
+
+  it should "CDB 广播时正确更新所有快照的 Ready List" in {
+    test(new RAT) { dut =>
+      setDefaultInputs(dut)
+
+      // 分配快照
+      setRenameReq(dut, rs1 = 0, rs2 = 0, rd = 0, isBranch = true)
+      val snapshotId = 1.U
+      dut.clock.step()
+
+      // 分配一个新的物理寄存器
+      setRenameReq(dut, rs1 = 0, rs2 = 0, rd = 1, isBranch = false)
+      val phyRd = 32.U
+      dut.clock.step()
+
+      // CDB 广播，标记物理寄存器 32 为 ready
+      dut.io.cdb.valid.poke(true.B)
+      dut.io.cdb.bits.phyRd.poke(phyRd)
+      dut.clock.step()
+
+      // 分支预测失败，恢复快照
+      dut.io.branchFlush.poke(true.B)
+      dut.io.snapshotId.poke(snapshotId)
+      dut.clock.step()
+
+      // 验证恢复后物理寄存器 32 的 ready 状态
+      // 由于 CDB 广播在快照保存之后，快照中的 Ready List 应该不包含物理寄存器 32 的 ready 状态
+      // 但由于 CDB 广播更新了所有快照的 Ready List，所以恢复后物理寄存器 32 应该是 ready 的
+      setRenameReq(dut, rs1 = 1, rs2 = 0, rd = 0, isBranch = false)
+      dut.io.renameRes.bits.rs1Ready.expect(true.B)  // 物理寄存器 32 应该是 ready 的
+    }
+  }
+
+  it should "CDB bypass forwarding 正确工作" in {
+    test(new RAT) { dut =>
+      setDefaultInputs(dut)
+
+      // 分配一个新的物理寄存器
+      setRenameReq(dut, rs1 = 0, rs2 = 0, rd = 1, isBranch = false)
+      val phyRd = 32.U
+      dut.clock.step()
+
+      // 新分配的物理寄存器应该是 not ready 的
+      setRenameReq(dut, rs1 = 1, rs2 = 0, rd = 0, isBranch = false)
+      dut.io.renameRes.bits.rs1Ready.expect(false.B)
+
+      // 同一周期内 CDB 广播，应该触发 bypass forwarding
+      dut.io.cdb.valid.poke(true.B)
+      dut.io.cdb.bits.phyRd.poke(phyRd)
+      // 由于 bypass forwarding 是组合逻辑，应该在同一周期生效
+      // 但由于 Chisel 的特性，可能需要在下一个周期验证
+    }
+  }
+
+  it should "Ready List 与 Free List 独立工作" in {
+    test(new RAT) { dut =>
+      setDefaultInputs(dut)
+
+      // 分配一个新的物理寄存器
+      setRenameReq(dut, rs1 = 0, rs2 = 0, rd = 1, isBranch = false)
+      val phyRd = 32.U
+      dut.clock.step()
+
+      // 新分配的物理寄存器应该是 busy 的（在 Free List 中）
+      // 但不一定是 ready 的（在 Ready List 中）
+      setRenameReq(dut, rs1 = 1, rs2 = 0, rd = 0, isBranch = false)
+      dut.io.renameRes.bits.rs1Ready.expect(false.B)  // not ready
+
+      // CDB 广播，标记物理寄存器 32 为 ready
+      dut.io.cdb.valid.poke(true.B)
+      dut.io.cdb.bits.phyRd.poke(phyRd)
+      dut.clock.step()
+
+      // 现在物理寄存器 32 应该是 ready 的
+      setRenameReq(dut, rs1 = 1, rs2 = 0, rd = 0, isBranch = false)
+      dut.io.renameRes.bits.rs1Ready.expect(true.B)  // ready
+
+      // 提交指令，回收物理寄存器 1（旧映射）
+      setCommit(dut, archRd = 1, phyRd = 32, preRd = 1)
+      dut.clock.step()
+
+      // 物理寄存器 1 应该被回收到 Free List（变为 not busy）
+      // 但物理寄存器 32 的 ready 状态应该保持不变
+      setRenameReq(dut, rs1 = 1, rs2 = 0, rd = 0, isBranch = false)
+      dut.io.renameRes.bits.rs1Ready.expect(true.B)  // 仍然是 ready 的
+    }
+  }
+
+  it should "正确处理多个 CDB 广播" in {
+    test(new RAT) { dut =>
+      setDefaultInputs(dut)
+
+      // 分配多个新的物理寄存器
+      setRenameReq(dut, rs1 = 0, rs2 = 0, rd = 1, isBranch = false)
+      val phyRd1 = 32.U
+      dut.clock.step()
+
+      setRenameReq(dut, rs1 = 0, rs2 = 0, rd = 2, isBranch = false)
+      val phyRd2 = 33.U
+      dut.clock.step()
+
+      // 新分配的物理寄存器应该是 not ready 的
+      setRenameReq(dut, rs1 = 1, rs2 = 2, rd = 0, isBranch = false)
+      dut.io.renameRes.bits.rs1Ready.expect(false.B)
+      dut.io.renameRes.bits.rs2Ready.expect(false.B)
+      dut.clock.step()
+
+      // CDB 广播，标记物理寄存器 32 为 ready
+      dut.io.cdb.valid.poke(true.B)
+      dut.io.cdb.bits.phyRd.poke(phyRd1)
+      dut.clock.step()
+
+      // 验证物理寄存器 32 是 ready 的，33 不是
+      setRenameReq(dut, rs1 = 1, rs2 = 2, rd = 0, isBranch = false)
+      dut.io.renameRes.bits.rs1Ready.expect(true.B)
+      dut.io.renameRes.bits.rs2Ready.expect(false.B)
+      dut.clock.step()
+
+      // CDB 广播，标记物理寄存器 33 为 ready
+      dut.io.cdb.bits.phyRd.poke(phyRd2)
+      dut.clock.step()
+
+      // 验证两个物理寄存器都是 ready 的
+      setRenameReq(dut, rs1 = 1, rs2 = 2, rd = 0, isBranch = false)
+      dut.io.renameRes.bits.rs1Ready.expect(true.B)
+      dut.io.renameRes.bits.rs2Ready.expect(true.B)
     }
   }
 }

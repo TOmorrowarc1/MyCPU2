@@ -49,7 +49,7 @@ class RAT extends Module with CPUConfig {
 
   // Frontend Ready List: 位矢量表示 128 个物理寄存器的 ready 状态
   // 1 表示数据已准备好，0 表示数据未准备好
-  val frontendReadyList = RegInit("h00000000".U(128.W))
+  val frontendReadyList = RegInit(~("h00000000".U(128.W)))
 
   // Snapshot: 保存分支指令时的 RAT、Free List 和 Ready List 状态
   class Snapshot extends Bundle with CPUConfig {
@@ -94,11 +94,11 @@ class RAT extends Module with CPUConfig {
   val rs1Ready = frontendReadyList(phyRs1)
   val rs2Ready = frontendReadyList(phyRs2)
   // CDB bypass forwarding
-  when (io.cdb.valid) {
-    when (io.cdb.bits.phyRd === phyRs1 && phyRs1 =/= 0.U) {
+  when(io.cdb.valid) {
+    when(io.cdb.bits.phyRd === phyRs1 && phyRs1 =/= 0.U) {
       rs1Ready := true.B
     }
-    when (io.cdb.bits.phyRd === phyRs2 && phyRs2 =/= 0.U) {
+    when(io.cdb.bits.phyRd === phyRs2 && phyRs2 =/= 0.U) {
       rs2Ready := true.B
     }
   }
@@ -120,8 +120,9 @@ class RAT extends Module with CPUConfig {
 
   // 预计算分配后的 FreeList 与 ReadyList
   when(renameReq.fire && rd =/= 0.U) {
-    frontendFreeListAfterAlloc := frontendFreeList | (1.U(128.W) << allocPhyRd)
-    frontendReadyListAfterAlloc := frontendReadyList & ~(1.U(128.W) << allocPhyRd)
+    val allocMask = 1.U(128.W) << allocPhyRd
+    frontendFreeListAfterAlloc := frontendFreeList | allocMask
+    frontendReadyListAfterAlloc := frontendReadyList & ~allocMask
   }
 
   // 3. 独热码快照分配逻辑
@@ -163,7 +164,7 @@ class RAT extends Module with CPUConfig {
     // 更新 Frontend Ready List（基于 AfterAlloc）
     frontendReadyListAfterBroadcast := frontendReadyListAfterAlloc | mask
     // 更新所有快照的 Ready List
-    for(i <- 0 until 4) {
+    for (i <- 0 until 4) {
       snapshotsReadyListsAfterBroadcast(i) := snapshots(i).readyList | mask
     }
   }
@@ -190,7 +191,10 @@ class RAT extends Module with CPUConfig {
       // 使用 Mux1H 快速选择独热码对应的快照状态
       frontendRat := Mux1H(io.snapshotId, snapshots.map(_.rat))
       frontendFreeList := Mux1H(io.snapshotId, snapshotsFreeListsAfterCommit)
-      frontendReadyList := Mux1H(io.snapshotId, snapshotsReadyListsAfterBroadcast)
+      frontendReadyList := Mux1H(
+        io.snapshotId,
+        snapshotsReadyListsAfterBroadcast
+      )
       // 恢复到该分支点时的快照占用状态（即该分支之前的快照仍然有效）
       snapshotsBusy := Mux1H(io.snapshotId, snapshots.map(_.snapshotsBusy))
     }.otherwise {
