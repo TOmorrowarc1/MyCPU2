@@ -91,8 +91,8 @@ class RAT extends Module with CPUConfig {
   // 查找源寄存器的物理寄存器号和 ready 状态
   val phyRs1 = frontendRat(rs1)
   val phyRs2 = frontendRat(rs2)
-  val rs1Ready = frontendReadyList(phyRs1)
-  val rs2Ready = frontendReadyList(phyRs2)
+  val rs1Ready = WireDefault(frontendReadyList(phyRs1))
+  val rs2Ready = WireDefault(frontendReadyList(phyRs2))
   // CDB bypass forwarding
   when(io.cdb.valid) {
     when(io.cdb.bits.phyRd === phyRs1 && phyRs1 =/= 0.U) {

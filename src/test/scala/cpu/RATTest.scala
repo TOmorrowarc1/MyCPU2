@@ -31,6 +31,11 @@ class RATTest extends AnyFlatSpec with ChiselScalatestTester {
     dut.io.renameReq.bits.isBranch.poke(isBranch.B)
   }
 
+  def setBroadcast(dut: RAT, phyRd: Int): Unit = {
+    dut.io.cdb.valid.poke(true.B)
+    dut.io.cdb.bits.phyRd.poke(phyRd.U)
+  }
+
   // 辅助函数：设置提交请求
   def setCommit(dut: RAT, archRd: Int, phyRd: Int, preRd: Int): Unit = {
     dut.io.commit.valid.poke(true.B)
@@ -102,11 +107,13 @@ class RATTest extends AnyFlatSpec with ChiselScalatestTester {
       setRenameReq(dut, rs1 = 1, rs2 = 2, rd = 4, isBranch = false)
       dut.io.renameRes.bits.phyRs1.expect(32.U)  // x1 现在映射到 32
       dut.io.renameRes.bits.phyRs2.expect(2.U)   // x2 仍然映射到 2
+      dut.io.renameRes.bits.rs1Ready.expect(false.B)  // 物理寄存器 32 初始是 ready 的
+      dut.io.renameRes.bits.rs2Ready.expect(true.B)
       dut.io.renameRes.bits.phyRd.expect(33.U)   // 下一个 free 物理寄存器
     }
   }
 
-  it should "正确处理 x0 寄存器" in {
+  it should "正确处理 x0 寄存器重命名" in {
     test(new RAT) { dut =>
       setDefaultInputs(dut)
 
@@ -123,33 +130,49 @@ class RATTest extends AnyFlatSpec with ChiselScalatestTester {
       // 验证 x0 的映射没有改变（仍然是 0）
       setRenameReq(dut, rs1 = 0, rs2 = 1, rd = 3, isBranch = false)
       dut.io.renameRes.bits.phyRs1.expect(0.U)
+      dut.io.renameRes.bits.phyRs2.expect(1.U)
+      dut.io.renameRes.bits.rs1Ready.expect(true.B)
     }
   }
 
   it should "正确更新源寄存器 ready 状态" in {
     test(new RAT) { dut =>
-      setDefaultInputs(dut)
-
       // 第一次重命名：ADD x1, x2, x3
+      setDefaultInputs(dut)
       setRenameReq(dut, rs1 = 2, rs2 = 3, rd = 1, isBranch = false)
       dut.clock.step()
 
       // 第二次重命名：ADD x4, x1, x5
-      // x1 现在映射到物理寄存器 32，该寄存器初始是 ready 的（因为初始 Ready List 全为 0，但初始 32 个物理寄存器有初始值）
+      // x1 现在映射到物理寄存器 32，该寄存器为上一条指令 rd，目前 not ready
+      setDefaultInputs(dut)
       setRenameReq(dut, rs1 = 1, rs2 = 5, rd = 4, isBranch = false)
       dut.io.renameRes.bits.phyRs1.expect(32.U)
-      dut.io.renameRes.bits.rs1Ready.expect(true.B)  // 物理寄存器 32 初始是 ready 的（因为初始 Ready List 全为 0，但初始 32 个物理寄存器有初始值）
+      dut.io.renameRes.bits.rs1Ready.expect(false.B)
       dut.clock.step()
 
       // 提交第一条指令，回收旧的物理寄存器
+      setDefaultInputs(dut)
+      setBroadcast(dut, phyRd = 32)
       setCommit(dut, archRd = 1, phyRd = 32, preRd = 1)
       dut.clock.step()
 
       // 再次重命名：ADD x6, x1, x7
       // x1 仍然映射到物理寄存器 32，但 1 已经被回收
+      // 目前 Free List 中序号最小的寄存器为 phy1，因此 x6 应当分配到 phy1.
+      setDefaultInputs(dut)
       setRenameReq(dut, rs1 = 1, rs2 = 7, rd = 6, isBranch = false)
       dut.io.renameRes.bits.phyRs1.expect(32.U)
-      dut.io.renameRes.bits.rs1Ready.expect(true.B)  // 物理寄存器 32 的 ready 状态
+      dut.io.renameRes.bits.rs1Ready.expect(true.B)
+      dut.io.renameRes.bits.phyRd.expect(1.U)  // 分配到回收的物理寄存器 1
+      dut.clock.step()
+
+      // CDB forwarding 检测
+      setDefaultInputs(dut)
+      setBroadcast(dut, phyRd = 1)
+      setRenameReq(dut, rs1 = 6, rs2 = 0, rd = 8, isBranch = false)
+      dut.io.renameRes.bits.phyRs1.expect(1.U)
+      dut.io.renameRes.bits.rs1Ready.expect(true.B)
+      dut.io.renameRes.bits.phyRd.expect(34.U)
     }
   }
 
