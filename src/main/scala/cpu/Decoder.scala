@@ -57,6 +57,7 @@ class Decoder extends Module with CPUConfig {
   val bruOp = Wire(BRUOp())
   val immType = Wire(ImmType())
   val zicsrOp = Wire(ZicsrOp())
+  val canWB = Wire(Bool())
 
   // 指令类型标志
   val specialInstr = Wire(SpecialInstr())
@@ -102,6 +103,7 @@ class Decoder extends Module with CPUConfig {
   immType := decodeEntry.immType
   specialInstr := decodeEntry.specialInstr
   zicsrOp := decodeEntry.zicsrOp
+  canWB := decodeEntry.canWB
 
   // 特殊指令标志
   isCsr := (specialInstr === SpecialInstr.CSR)
@@ -263,7 +265,7 @@ class Decoder extends Module with CPUConfig {
   io.renameReq.valid := decoderValid
   io.renameReq.bits.rs1 := rs1
   io.renameReq.bits.rs2 := rs2
-  io.renameReq.bits.rd := Mux(hasException, 0.U, rd)
+  io.renameReq.bits.rd := Mux(hasException || !canWB, 0.U, rd)
   io.renameReq.bits.isBranch := (specialInstr === SpecialInstr.BRANCH)
 
   // ROB 初始化控制包
