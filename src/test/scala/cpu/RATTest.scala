@@ -647,21 +647,39 @@ class RATTest extends AnyFlatSpec with ChiselScalatestTester {
       dut.clock.step()
 
       // 提交指令，更新 Retirement RAT
+      setDefaultInputs(dut)
       setCommit(dut, archRd = 1, phyRd = 32, preRd = 1)
       dut.clock.step()
 
       // 继续执行指令
-      setRenameReq(dut, rs1 = 0, rs2 = 0, rd = 2, isBranch = false)
+      setDefaultInputs(dut)
+      setRenameReq(dut, rs1 = 1, rs2 = 2, rd = 2, isBranch = false)
+      dut.clock.step()
+
+      // 继续执行指令
+      setDefaultInputs(dut)
+      setRenameReq(dut, rs1 = 3, rs2 = 2, rd = 1, isBranch = false)
+      dut.clock.step()
+
+      // 继续执行指令
+      setDefaultInputs(dut)
+      setRenameReq(dut, rs1 = 1, rs2 = 3, rd = 1, isBranch = false)
       dut.clock.step()
 
       // Global Flush
+      setDefaultInputs(dut)
       dut.io.globalFlush.poke(true.B)
       dut.clock.step()
 
       // 验证恢复后的状态
       // x1 应该映射到 32（Retirement RAT 的状态）
-      setRenameReq(dut, rs1 = 1, rs2 = 0, rd = 3, isBranch = false)
+      setDefaultInputs(dut)
+      setRenameReq(dut, rs1 = 1, rs2 = 3, rd = 3, isBranch = false)
       dut.io.renameRes.bits.phyRs1.expect(32.U)
+      dut.io.renameRes.bits.rs1Ready.expect(true.B)
+      dut.io.renameRes.bits.phyRs2.expect(3.U)
+      dut.io.renameRes.bits.rs2Ready.expect(true.B)
+      dut.io.renameRes.bits.phyRd.expect(1.U)
     }
   }
 

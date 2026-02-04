@@ -187,6 +187,8 @@ class RAT extends Module with CPUConfig {
     frontendRat := retirementRat
     // 恢复 Free List
     frontendFreeList := retirementFreeList
+    // 恢复 Ready List
+    frontendReadyList := ~("h00000000".U(128.W))
     // 清空所有快照
     snapshotsBusy := 0.U
   }.otherwise {
@@ -252,4 +254,6 @@ class RAT extends Module with CPUConfig {
 
   io.commit.ready := true.B
   io.cdb.ready := true.B
+  printf(p"frontend RAT: ${frontendRat}\n")
+  printf(p"retirement RAT: ${retirementRat}\n")
 }
