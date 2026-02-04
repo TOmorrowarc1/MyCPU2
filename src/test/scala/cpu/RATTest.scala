@@ -23,7 +23,13 @@ class RATTest extends AnyFlatSpec with ChiselScalatestTester {
   }
 
   // 辅助函数：设置重命名请求
-  def setRenameReq(dut: RAT, rs1: Int, rs2: Int, rd: Int, isBranch: Boolean = false): Unit = {
+  def setRenameReq(
+      dut: RAT,
+      rs1: Int,
+      rs2: Int,
+      rd: Int,
+      isBranch: Boolean = false
+  ): Unit = {
     dut.io.renameReq.valid.poke(true.B)
     dut.io.renameReq.bits.rs1.poke(rs1.U)
     dut.io.renameReq.bits.rs2.poke(rs2.U)
@@ -64,8 +70,8 @@ class RATTest extends AnyFlatSpec with ChiselScalatestTester {
 
       dut.io.globalFlush.poke(true.B)
       dut.clock.step()
-      
-      for(i <- 0 until 32) {
+
+      for (i <- 0 until 32) {
         // 验证 Global Flush 后 Retirement RAT 状态正确
         setRenameReq(dut, rs1 = i, rs2 = 0, rd = 0, isBranch = false)
         dut.io.renameRes.bits.phyRs1.expect(i.U)
@@ -87,29 +93,29 @@ class RATTest extends AnyFlatSpec with ChiselScalatestTester {
       // 验证重命名结果
       dut.io.renameReq.ready.expect(true.B)
       dut.io.renameRes.valid.expect(true.B)
-      dut.io.renameRes.bits.phyRs1.expect(2.U)  // 初始映射
-      dut.io.renameRes.bits.phyRs2.expect(3.U)  // 初始映射
-      dut.io.renameRes.bits.rs1Ready.expect(true.B)  // 初始物理寄存器都是 ready 的
+      dut.io.renameRes.bits.phyRs1.expect(2.U) // 初始映射
+      dut.io.renameRes.bits.phyRs2.expect(3.U) // 初始映射
+      dut.io.renameRes.bits.rs1Ready.expect(true.B) // 初始物理寄存器都是 ready 的
       dut.io.renameRes.bits.rs2Ready.expect(true.B)
-      dut.io.renameRes.bits.phyRd.expect(32.U)  // 第一个 free 物理寄存器
-      dut.io.renameRes.bits.snapshotOH.expect(0.U)  // 非分支指令
-      dut.io.renameRes.bits.branchMask.expect(0.U)  // 无分支依赖
+      dut.io.renameRes.bits.phyRd.expect(32.U) // 第一个 free 物理寄存器
+      dut.io.renameRes.bits.snapshotOH.expect(0.U) // 非分支指令
+      dut.io.renameRes.bits.branchMask.expect(0.U) // 无分支依赖
 
       // 验证 ROB 数据包
       dut.io.robData.valid.expect(true.B)
       dut.io.robData.bits.archRd.expect(1.U)
       dut.io.robData.bits.phyRd.expect(32.U)
-      dut.io.robData.bits.phyOld.expect(1.U)  // 旧的物理寄存器
+      dut.io.robData.bits.phyOld.expect(1.U) // 旧的物理寄存器
 
       dut.clock.step()
 
       // 再次重命名，验证映射已更新
       setRenameReq(dut, rs1 = 1, rs2 = 2, rd = 4, isBranch = false)
-      dut.io.renameRes.bits.phyRs1.expect(32.U)  // x1 现在映射到 32
-      dut.io.renameRes.bits.phyRs2.expect(2.U)   // x2 仍然映射到 2
-      dut.io.renameRes.bits.rs1Ready.expect(false.B)  // 物理寄存器 32 初始是 ready 的
+      dut.io.renameRes.bits.phyRs1.expect(32.U) // x1 现在映射到 32
+      dut.io.renameRes.bits.phyRs2.expect(2.U) // x2 仍然映射到 2
+      dut.io.renameRes.bits.rs1Ready.expect(false.B) // 物理寄存器 32 初始是 ready 的
       dut.io.renameRes.bits.rs2Ready.expect(true.B)
-      dut.io.renameRes.bits.phyRd.expect(33.U)   // 下一个 free 物理寄存器
+      dut.io.renameRes.bits.phyRd.expect(33.U) // 下一个 free 物理寄存器
     }
   }
 
@@ -163,7 +169,7 @@ class RATTest extends AnyFlatSpec with ChiselScalatestTester {
       setRenameReq(dut, rs1 = 1, rs2 = 7, rd = 6, isBranch = false)
       dut.io.renameRes.bits.phyRs1.expect(32.U)
       dut.io.renameRes.bits.rs1Ready.expect(true.B)
-      dut.io.renameRes.bits.phyRd.expect(1.U)  // 分配到回收的物理寄存器 1
+      dut.io.renameRes.bits.phyRd.expect(1.U) // 分配到回收的物理寄存器 1
       dut.clock.step()
 
       // CDB forwarding 检测
@@ -218,11 +224,11 @@ class RATTest extends AnyFlatSpec with ChiselScalatestTester {
       setDefaultInputs(dut)
       setCommit(dut, archRd = 2, phyRd = 33, preRd = 2)
       setRenameReq(dut, rs1 = 0, rs2 = 0, rd = 4, isBranch = false)
-      dut.io.renameRes.bits.phyRd.expect(34.U)  // 还没回收 phy2 
+      dut.io.renameRes.bits.phyRd.expect(34.U) // 还没回收 phy2
       dut.clock.step()
       setDefaultInputs(dut)
       setRenameReq(dut, rs1 = 0, rs2 = 0, rd = 5, isBranch = false)
-      dut.io.renameRes.bits.phyRd.expect(2.U)  // 现在 phy2 被回收了
+      dut.io.renameRes.bits.phyRd.expect(2.U) // 现在 phy2 被回收了
     }
   }
 
@@ -238,16 +244,16 @@ class RATTest extends AnyFlatSpec with ChiselScalatestTester {
       setRenameReq(dut, rs1 = 1, rs2 = 2, rd = 0, isBranch = true)
 
       // 验证快照分配
-      dut.io.renameRes.bits.snapshotOH.expect(1.U)  // 独热码，分配第一个快照
-      dut.io.renameRes.bits.branchMask.expect(1.U)  // 当前分支掩码
+      dut.io.renameRes.bits.snapshotOH.expect(1.U) // 独热码，分配第一个快照
+      dut.io.renameRes.bits.branchMask.expect(1.U) // 当前分支掩码
 
       dut.clock.step()
 
       // 验证快照已占用
       // 再次分支指令，应该分配第二个快照
       setRenameReq(dut, rs1 = 3, rs2 = 4, rd = 0, isBranch = true)
-      dut.io.renameRes.bits.snapshotOH.expect(2.U)  // 第二个快照
-      dut.io.renameRes.bits.branchMask.expect(3.U)  // 0b11，两个分支都有效
+      dut.io.renameRes.bits.snapshotOH.expect(2.U) // 第二个快照
+      dut.io.renameRes.bits.branchMask.expect(3.U) // 0b11，两个分支都有效
     }
   }
 
@@ -258,8 +264,8 @@ class RATTest extends AnyFlatSpec with ChiselScalatestTester {
       // 连续执行 4 个分支指令
       for (i <- 0 until 4) {
         setRenameReq(dut, rs1 = 0, rs2 = 0, rd = 0, isBranch = true)
-        dut.io.renameRes.bits.snapshotOH.expect((1 << i).U)  // 独热码
-        dut.io.renameRes.bits.branchMask.expect(((1 << (i + 1)) - 1).U)  // 分支掩码
+        dut.io.renameRes.bits.snapshotOH.expect((1 << i).U) // 独热码
+        dut.io.renameRes.bits.branchMask.expect(((1 << (i + 1)) - 1).U) // 分支掩码
         dut.clock.step()
       }
     }
@@ -299,18 +305,30 @@ class RATTest extends AnyFlatSpec with ChiselScalatestTester {
       dut.clock.step()
 
       // 分支后继续执行指令，修改 RAT
-      setRenameReq(dut, rs1 = 1, rs2 = 2, rd = 3, isBranch = false)
+      setRenameReq(dut, rs1 = 1, rs2 = 2, rd = 1, isBranch = false)
+      dut.clock.step()
+
+      setRenameReq(dut, rs1 = 1, rs2 = 2, rd = 4, isBranch = false)
+      dut.io.renameRes.bits.phyRs1.expect(34.U) // x1 映射到 phy34
+      dut.io.renameRes.bits.phyRd.expect(35.U)
       dut.clock.step()
 
       // 模拟分支预测失败，恢复快照
+      setDefaultInputs(dut)
       dut.io.branchFlush.poke(true.B)
       dut.io.snapshotId.poke(snapshotId)
       dut.clock.step()
 
       // 验证 RAT 已恢复到分支前的状态
       // x1 应该映射到 32（分支前的状态）
-      setRenameReq(dut, rs1 = 1, rs2 = 2, rd = 4, isBranch = false)
+      setDefaultInputs(dut)
+      setRenameReq(dut, rs1 = 1, rs2 = 2, rd = 3, isBranch = false)
       dut.io.renameRes.bits.phyRs1.expect(32.U)
+      dut.io.renameRes.bits.phyRd.expect(34.U)
+      dut.clock.step()
+
+      setRenameReq(dut, rs1 = 3, rs2 = 0, rd = 0, isBranch = false)
+      dut.io.renameRes.bits.phyRs1.expect(34.U)
     }
   }
 
@@ -325,12 +343,12 @@ class RATTest extends AnyFlatSpec with ChiselScalatestTester {
 
       // 第二个分支
       setRenameReq(dut, rs1 = 0, rs2 = 0, rd = 0, isBranch = true)
-      dut.io.renameRes.bits.branchMask.expect(3.U)  // 0b11
+      dut.io.renameRes.bits.branchMask.expect(3.U) // 0b11
       dut.clock.step()
 
       // 普通指令
       setRenameReq(dut, rs1 = 0, rs2 = 0, rd = 1, isBranch = false)
-      dut.io.renameRes.bits.branchMask.expect(3.U)  // 保持不变
+      dut.io.renameRes.bits.branchMask.expect(3.U) // 保持不变
     }
   }
 
@@ -437,7 +455,7 @@ class RATTest extends AnyFlatSpec with ChiselScalatestTester {
       // 验证第一个快照已被回收
       // 下一个分支应该可以分配到第一个快照槽位
       setRenameReq(dut, rs1 = 0, rs2 = 0, rd = 0, isBranch = true)
-      dut.io.renameRes.bits.snapshotOH.expect(1.U)  // 可以重新分配
+      dut.io.renameRes.bits.snapshotOH.expect(1.U) // 可以重新分配
     }
   }
 
@@ -632,7 +650,7 @@ class RATTest extends AnyFlatSpec with ChiselScalatestTester {
 
       // 验证恢复后的状态
       setRenameReq(dut, rs1 = 1, rs2 = 0, rd = 3, isBranch = false)
-      dut.io.renameRes.bits.phyRs1.expect(32.U)  // x1 映射到 32
+      dut.io.renameRes.bits.phyRs1.expect(32.U) // x1 映射到 32
     }
   }
 
@@ -660,7 +678,7 @@ class RATTest extends AnyFlatSpec with ChiselScalatestTester {
       // 验证恢复后的状态
       // 物理寄存器 1 应该已经被回收
       setRenameReq(dut, rs1 = 0, rs2 = 0, rd = 2, isBranch = false)
-      dut.io.renameRes.bits.phyRd.expect(33.U)  // 下一个可用的物理寄存器
+      dut.io.renameRes.bits.phyRd.expect(33.U) // 下一个可用的物理寄存器
     }
   }
 
@@ -689,7 +707,7 @@ class RATTest extends AnyFlatSpec with ChiselScalatestTester {
       // 验证 Global Flush 优先
       // 所有快照应该被清空
       setRenameReq(dut, rs1 = 0, rs2 = 0, rd = 0, isBranch = true)
-      dut.io.renameRes.bits.snapshotOH.expect(1.U)  // 可以分配第一个快照
+      dut.io.renameRes.bits.snapshotOH.expect(1.U) // 可以分配第一个快照
     }
   }
 
@@ -705,7 +723,7 @@ class RATTest extends AnyFlatSpec with ChiselScalatestTester {
       // 后96个物理寄存器应该是 not ready 的
       for (i <- 0 until 32) {
         setRenameReq(dut, rs1 = i, rs2 = 0, rd = 0, isBranch = false)
-        dut.io.renameRes.bits.rs1Ready.expect(true.B)  // 初始物理寄存器都是 ready 的
+        dut.io.renameRes.bits.rs1Ready.expect(true.B) // 初始物理寄存器都是 ready 的
         dut.clock.step()
       }
     }
@@ -723,7 +741,7 @@ class RATTest extends AnyFlatSpec with ChiselScalatestTester {
 
       // 新分配的物理寄存器应该是 not ready 的
       setRenameReq(dut, rs1 = 1, rs2 = 0, rd = 0, isBranch = false)
-      dut.io.renameRes.bits.rs1Ready.expect(false.B)  // 物理寄存器 32 还没有 ready
+      dut.io.renameRes.bits.rs1Ready.expect(false.B) // 物理寄存器 32 还没有 ready
       dut.clock.step()
 
       // CDB 广播，标记物理寄存器 32 为 ready
@@ -733,7 +751,7 @@ class RATTest extends AnyFlatSpec with ChiselScalatestTester {
 
       // 验证物理寄存器 32 现在是 ready 的
       setRenameReq(dut, rs1 = 1, rs2 = 0, rd = 0, isBranch = false)
-      dut.io.renameRes.bits.rs1Ready.expect(true.B)  // 物理寄存器 32 现在是 ready 的
+      dut.io.renameRes.bits.rs1Ready.expect(true.B) // 物理寄存器 32 现在是 ready 的
     }
   }
 
@@ -765,7 +783,7 @@ class RATTest extends AnyFlatSpec with ChiselScalatestTester {
       // 由于 CDB 广播在快照保存之后，快照中的 Ready List 应该不包含物理寄存器 32 的 ready 状态
       // 但由于 CDB 广播更新了所有快照的 Ready List，所以恢复后物理寄存器 32 应该是 ready 的
       setRenameReq(dut, rs1 = 1, rs2 = 0, rd = 0, isBranch = false)
-      dut.io.renameRes.bits.rs1Ready.expect(true.B)  // 物理寄存器 32 应该是 ready 的
+      dut.io.renameRes.bits.rs1Ready.expect(true.B) // 物理寄存器 32 应该是 ready 的
     }
   }
 
@@ -802,7 +820,7 @@ class RATTest extends AnyFlatSpec with ChiselScalatestTester {
       // 新分配的物理寄存器应该是 busy 的（在 Free List 中）
       // 但不一定是 ready 的（在 Ready List 中）
       setRenameReq(dut, rs1 = 1, rs2 = 0, rd = 0, isBranch = false)
-      dut.io.renameRes.bits.rs1Ready.expect(false.B)  // not ready
+      dut.io.renameRes.bits.rs1Ready.expect(false.B) // not ready
 
       // CDB 广播，标记物理寄存器 32 为 ready
       dut.io.cdb.valid.poke(true.B)
@@ -811,7 +829,7 @@ class RATTest extends AnyFlatSpec with ChiselScalatestTester {
 
       // 现在物理寄存器 32 应该是 ready 的
       setRenameReq(dut, rs1 = 1, rs2 = 0, rd = 0, isBranch = false)
-      dut.io.renameRes.bits.rs1Ready.expect(true.B)  // ready
+      dut.io.renameRes.bits.rs1Ready.expect(true.B) // ready
 
       // 提交指令，回收物理寄存器 1（旧映射）
       setCommit(dut, archRd = 1, phyRd = 32, preRd = 1)
@@ -820,7 +838,7 @@ class RATTest extends AnyFlatSpec with ChiselScalatestTester {
       // 物理寄存器 1 应该被回收到 Free List（变为 not busy）
       // 但物理寄存器 32 的 ready 状态应该保持不变
       setRenameReq(dut, rs1 = 1, rs2 = 0, rd = 0, isBranch = false)
-      dut.io.renameRes.bits.rs1Ready.expect(true.B)  // 仍然是 ready 的
+      dut.io.renameRes.bits.rs1Ready.expect(true.B) // 仍然是 ready 的
     }
   }
 

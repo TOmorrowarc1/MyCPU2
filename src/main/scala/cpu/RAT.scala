@@ -72,11 +72,15 @@ class RAT extends Module with CPUConfig {
   val frontendFreeListAfterCommit = WireDefault(frontendFreeListAfterAlloc)
   val frontendReadyListAfterAlloc = WireDefault(frontendReadyList)
   val frontendReadyListAfterBroadcast = WireDefault(frontendReadyListAfterAlloc)
+  val snapshotsFreeListsAfterAlloc = Wire(Vec(4, UInt(128.W)))
   val snapshotsFreeListsAfterCommit = Wire(Vec(4, UInt(128.W)))
+  val snapshotsReadyListsAfterAlloc = Wire(Vec(4, UInt(128.W)))
   val snapshotsReadyListsAfterBroadcast = Wire(Vec(4, UInt(128.W)))
   for (i <- 0 until 4) {
-    snapshotsFreeListsAfterCommit(i) := snapshots(i).freeList
-    snapshotsReadyListsAfterBroadcast(i) := snapshots(i).readyList
+    snapshotsFreeListsAfterAlloc(i) := snapshots(i).freeList
+    snapshotsFreeListsAfterCommit(i) := snapshotsFreeListsAfterAlloc(i)
+    snapshotsReadyListsAfterAlloc(i) := snapshots(i).readyList
+    snapshotsReadyListsAfterBroadcast(i) := snapshotsReadyListsAfterAlloc(i)
   }
   val retirementRatAfterCommit = WireDefault(retirementRat)
 
@@ -135,8 +139,8 @@ class RAT extends Module with CPUConfig {
     for (i <- 0 until 4) {
       when(allocSnapshotOH(i)) {
         snapshots(i).rat := frontendRat
-        snapshots(i).freeList := frontendFreeListAfterCommit
-        snapshots(i).readyList := frontendReadyListAfterBroadcast
+        snapshotsFreeListsAfterAlloc(i) := frontendFreeListAfterCommit
+        snapshotsReadyListsAfterAlloc(i) := frontendReadyListAfterBroadcast
         snapshots(i).snapshotsBusy := snapshotsBusy // 记录当前已存在的快照依赖
       }
     }
@@ -149,7 +153,9 @@ class RAT extends Module with CPUConfig {
   when(io.commit.valid && io.commit.bits.preRd =/= 0.U) {
     val reclaimMask = ~(1.U(128.W) << io.commit.bits.preRd)
     for (i <- 0 until 4) {
-      snapshotsFreeListsAfterCommit(i) := snapshots(i).freeList & reclaimMask
+      snapshotsFreeListsAfterCommit(i) := snapshotsFreeListsAfterAlloc(
+        i
+      ) & reclaimMask
     }
     frontendFreeListAfterCommit := frontendFreeListAfterAlloc & reclaimMask
     retirementFreeListAfterCommit := retirementFreeList & reclaimMask
@@ -166,7 +172,9 @@ class RAT extends Module with CPUConfig {
     frontendReadyListAfterBroadcast := frontendReadyListAfterAlloc | mask
     // 更新所有快照的 Ready List
     for (i <- 0 until 4) {
-      snapshotsReadyListsAfterBroadcast(i) := snapshots(i).readyList | mask
+      snapshotsReadyListsAfterBroadcast(i) := snapshotsReadyListsAfterAlloc(
+        i
+      ) | mask
     }
   }
 
