@@ -10,12 +10,12 @@ class PRFTest extends AnyFlatSpec with ChiselScalatestTester {
   // 辅助函数：设置默认输入信号
   def setDefaultInputs(dut: PRF): Unit = {
     dut.io.readReq.valid.poke(false.B)
-    dut.io.readReq.bits.raddr1.poke(0.U)
-    dut.io.readReq.bits.raddr2.poke(0.U)
+    dut.io.readReq.bits.raddr1.poke(0L.U)
+    dut.io.readReq.bits.raddr2.poke(0L.U)
     dut.io.readReq.ready.expect(true.B)
     dut.io.write.valid.poke(false.B)
-    dut.io.write.bits.rd.poke(0.U)
-    dut.io.write.bits.data.poke(0.U)
+    dut.io.write.bits.rd.poke(0L.U)
+    dut.io.write.bits.data.poke(0L.U)
   }
 
   // 辅助函数：设置读请求
@@ -45,7 +45,7 @@ class PRFTest extends AnyFlatSpec with ChiselScalatestTester {
       for (regAddr <- testRegs) {
         setReadReq(dut, raddr1 = regAddr)
         dut.io.readResp.valid.expect(true.B)
-        dut.io.readResp.bits.rdata1.expect(0.U)
+        dut.io.readResp.bits.rdata1.expect(0L.U)
         dut.clock.step()
       }
 
@@ -72,12 +72,12 @@ class PRFTest extends AnyFlatSpec with ChiselScalatestTester {
       // 读取寄存器 1
       setReadReq(dut, raddr1 = 1)
       dut.io.readResp.valid.expect(true.B)
-      dut.io.readResp.bits.rdata1.expect(0x12345678.U)
+      dut.io.readResp.bits.rdata1.expect(0x12345678L.U)
       dut.clock.step()
 
       // 读取寄存器 2
       setReadReq(dut, raddr1 = 2)
-      dut.io.readResp.bits.rdata1.expect(0xABCDEF00.U)
+      dut.io.readResp.bits.rdata1.expect(0xABCDEF00L.U)
       dut.clock.step()
     }
   }
@@ -96,8 +96,8 @@ class PRFTest extends AnyFlatSpec with ChiselScalatestTester {
       // 读取 x0 寄存器
       setReadReq(dut, raddr1 = 0, raddr2 = 0)
       dut.io.readResp.valid.expect(true.B)
-      dut.io.readResp.bits.rdata1.expect(0.U)
-      dut.io.readResp.bits.rdata2.expect(0.U)
+      dut.io.readResp.bits.rdata1.expect(0L.U)
+      dut.io.readResp.bits.rdata2.expect(0L.U)
     }
   }
 
@@ -122,7 +122,7 @@ class PRFTest extends AnyFlatSpec with ChiselScalatestTester {
 
       // 读取寄存器 5
       setReadReq(dut, raddr1 = 5)
-      dut.io.readResp.bits.rdata1.expect(0x33333333.U)
+      dut.io.readResp.bits.rdata1.expect(0x33333333L.U)
     }
   }
 
@@ -146,8 +146,8 @@ class PRFTest extends AnyFlatSpec with ChiselScalatestTester {
 
       // 同时读取寄存器 3 和 4
       setReadReq(dut, raddr1 = 3, raddr2 = 4)
-      dut.io.readResp.bits.rdata1.expect(0x11112222.U)
-      dut.io.readResp.bits.rdata2.expect(0x33334444.U)
+      dut.io.readResp.bits.rdata1.expect(0x11112222L.U)
+      dut.io.readResp.bits.rdata2.expect(0x33334444L.U)
       dut.clock.step()
     }
   }
@@ -165,8 +165,8 @@ class PRFTest extends AnyFlatSpec with ChiselScalatestTester {
 
       // 同时读取同一寄存器
       setReadReq(dut, raddr1 = 10, raddr2 = 10)
-      dut.io.readResp.bits.rdata1.expect(0xABCDEF12.U)
-      dut.io.readResp.bits.rdata2.expect(0xABCDEF12.U)
+      dut.io.readResp.bits.rdata1.expect(0xABCDEF12L.U)
+      dut.io.readResp.bits.rdata2.expect(0xABCDEF12L.U)
     }
   }
 
@@ -183,8 +183,8 @@ class PRFTest extends AnyFlatSpec with ChiselScalatestTester {
 
       // 读取 x0 和寄存器 20
       setReadReq(dut, raddr1 = 0, raddr2 = 20)
-      dut.io.readResp.bits.rdata1.expect(0.U)
-      dut.io.readResp.bits.rdata2.expect(0xDEADBEEF.U)
+      dut.io.readResp.bits.rdata1.expect(0L.U)
+      dut.io.readResp.bits.rdata2.expect(0xDEADBEEFL.U)
     }
   }
 
@@ -205,7 +205,7 @@ class PRFTest extends AnyFlatSpec with ChiselScalatestTester {
 
       // 读取寄存器 10（应该返回 0xAAAA）
       setReadReq(dut, raddr1 = 10)
-      dut.io.readResp.bits.rdata1.expect(0xAAAA.U)
+      dut.io.readResp.bits.rdata1.expect(0xAAAAL.U)
       dut.clock.step()
 
       // 在下一周期写入寄存器 10
@@ -216,7 +216,7 @@ class PRFTest extends AnyFlatSpec with ChiselScalatestTester {
       // 再次读取寄存器 10（应该返回新值 0xBBBB）
       setDefaultInputs(dut)
       setReadReq(dut, raddr1 = 10)
-      dut.io.readResp.bits.rdata1.expect(0xBBBB.U)
+      dut.io.readResp.bits.rdata1.expect(0xBBBBL.U)
     }
   }
 
@@ -231,13 +231,13 @@ class PRFTest extends AnyFlatSpec with ChiselScalatestTester {
       // 在同一周期内读取寄存器 15 并写入寄存器 20
       setReadReq(dut, raddr1 = 15)
       setWrite(dut, rd = 20, data = 0x2222L)
-      dut.io.readResp.bits.rdata1.expect(0x1111.U) // 读操作返回旧值
+      dut.io.readResp.bits.rdata1.expect(0x1111L.U) // 读操作返回旧值
       dut.clock.step()
 
       // 验证寄存器 20 的值
       setDefaultInputs(dut)
       setReadReq(dut, raddr1 = 20)
-      dut.io.readResp.bits.rdata1.expect(0x2222.U)
+      dut.io.readResp.bits.rdata1.expect(0x2222L.U)
     }
   }
 
@@ -263,7 +263,7 @@ class PRFTest extends AnyFlatSpec with ChiselScalatestTester {
 
       // 验证 valid 信号和数据
       dut.io.readResp.valid.expect(true.B)
-      dut.io.readResp.bits.rdata1.expect(0x12345678.U)
+      dut.io.readResp.bits.rdata1.expect(0x12345678L.U)
     }
   }
 
@@ -286,7 +286,7 @@ class PRFTest extends AnyFlatSpec with ChiselScalatestTester {
       // 设置 readReq.valid = true
       setReadReq(dut, raddr1 = 25)
       dut.io.readResp.valid.expect(true.B)
-      dut.io.readResp.bits.rdata1.expect(0x55555555.U)
+      dut.io.readResp.bits.rdata1.expect(0x55555555L.U)
     }
   }
 
@@ -305,7 +305,7 @@ class PRFTest extends AnyFlatSpec with ChiselScalatestTester {
       // 读取最大寄存器 127
       setDefaultInputs(dut)
       setReadReq(dut, raddr1 = 127)
-      dut.io.readResp.bits.rdata1.expect(0x99999999.U)
+      dut.io.readResp.bits.rdata1.expect(0x99999999L.U)
     }
   }
 
@@ -318,7 +318,7 @@ class PRFTest extends AnyFlatSpec with ChiselScalatestTester {
       dut.clock.step()
 
       setReadReq(dut, raddr1 = 50)
-      dut.io.readResp.bits.rdata1.expect(0x00000000.U)
+      dut.io.readResp.bits.rdata1.expect(0x00000000L.U)
       dut.clock.step()
 
       // 写入 0xFFFFFFFF
@@ -326,7 +326,7 @@ class PRFTest extends AnyFlatSpec with ChiselScalatestTester {
       dut.clock.step()
 
       setReadReq(dut, raddr1 = 51)
-      dut.io.readResp.bits.rdata1.expect(0xFFFFFFFF.U)
+      dut.io.readResp.bits.rdata1.expect(0xFFFFFFFFL.U)
       dut.clock.step()
 
       // 写入 0x80000000
@@ -334,7 +334,7 @@ class PRFTest extends AnyFlatSpec with ChiselScalatestTester {
       dut.clock.step()
 
       setReadReq(dut, raddr1 = 52)
-      dut.io.readResp.bits.rdata1.expect(0x80000000.U)
+      dut.io.readResp.bits.rdata1.expect(0x80000000L.U)
     }
   }
 
@@ -358,7 +358,7 @@ class PRFTest extends AnyFlatSpec with ChiselScalatestTester {
       // 连续读取多个寄存器
       for (i <- 0 until 10) {
         setReadReq(dut, raddr1 = i)
-        dut.io.readResp.bits.rdata1.expect((i * 0x11111111).U)
+        dut.io.readResp.bits.rdata1.expect((i * 0x11111111L).U)
         dut.clock.step()
       }
     }
@@ -375,7 +375,7 @@ class PRFTest extends AnyFlatSpec with ChiselScalatestTester {
       // 读取寄存器 1
       setDefaultInputs(dut)
       setReadReq(dut, raddr1 = 1)
-      dut.io.readResp.bits.rdata1.expect(0x11111111.U)
+      dut.io.readResp.bits.rdata1.expect(0x11111111L.U)
       dut.clock.step()
 
       // 写入寄存器 2
@@ -386,7 +386,7 @@ class PRFTest extends AnyFlatSpec with ChiselScalatestTester {
       // 读取寄存器 2
       setDefaultInputs(dut)
       setReadReq(dut, raddr1 = 2)
-      dut.io.readResp.bits.rdata1.expect(0x22222222.U)
+      dut.io.readResp.bits.rdata1.expect(0x22222222L.U)
       dut.clock.step()
 
       // 再次写入寄存器 1
@@ -397,7 +397,7 @@ class PRFTest extends AnyFlatSpec with ChiselScalatestTester {
       // 读取寄存器 1（应该返回新值）
       setDefaultInputs(dut)
       setReadReq(dut, raddr1 = 1)
-      dut.io.readResp.bits.rdata1.expect(0x33333333.U)
+      dut.io.readResp.bits.rdata1.expect(0x33333333L.U)
     }
   }
 
@@ -418,14 +418,14 @@ class PRFTest extends AnyFlatSpec with ChiselScalatestTester {
       // 同时读取寄存器 10 和 11，并写入寄存器 12
       setReadReq(dut, raddr1 = 10, raddr2 = 11)
       setWrite(dut, rd = 12, data = 0xDDDDDDDDL)
-      dut.io.readResp.bits.rdata1.expect(0xAAAAAAAA.U)
-      dut.io.readResp.bits.rdata2.expect(0xBBBBBBBB.U)
+      dut.io.readResp.bits.rdata1.expect(0xAAAAAAAAL.U)
+      dut.io.readResp.bits.rdata2.expect(0xBBBBBBBBL.U)
       dut.clock.step()
 
       // 验证寄存器 12 的值已更新
       setDefaultInputs(dut)
       setReadReq(dut, raddr1 = 12)
-      dut.io.readResp.bits.rdata1.expect(0xDDDDDDDD.U)
+      dut.io.readResp.bits.rdata1.expect(0xDDDDDDDDL.U)
     }
   }
 
@@ -446,11 +446,11 @@ class PRFTest extends AnyFlatSpec with ChiselScalatestTester {
 
       // 读取 x0（应该仍然是 0）
       setReadReq(dut, raddr1 = 0)
-      dut.io.readResp.bits.rdata1.expect(0.U)
+      dut.io.readResp.bits.rdata1.expect(0L.U)
 
       // 读取寄存器 20（应该不受影响）
       setReadReq(dut, raddr1 = 20)
-      dut.io.readResp.bits.rdata1.expect(0xDEADBEEF.U)
+      dut.io.readResp.bits.rdata1.expect(0xDEADBEEFL.U)
     }
   }
 }

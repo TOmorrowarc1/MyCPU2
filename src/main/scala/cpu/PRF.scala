@@ -23,6 +23,7 @@ class PRF extends Module with CPUConfig {
   val regs = RegInit(VecInit(Seq.fill(phyRegNum)(0.U(32.W))))
 
   // 读请求处理
+  io.readReq.ready := true.B
   val rData1 = WireDefault(0.U(32.W))
   val rData2 = WireDefault(0.U(32.W))
   val readReqValid = io.readReq.valid
