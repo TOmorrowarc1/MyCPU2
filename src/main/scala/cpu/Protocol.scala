@@ -208,7 +208,7 @@ class RenameRes extends Bundle with CPUConfig {
   val phyRs2 = PhyTag
   val rs2Ready = Bool() // 源寄存器2 数据是否 ready (用于 CDB 旁路)
   val phyRd = PhyTag // 目标寄存器 物理号
-  val snapshotId = SnapshotId // 分配的快照 ID (分支专用)
+  val snapshotOH = SnapshotMask // 分配的快照 ID (分支专用)
   val branchMask = SnapshotMask // 当前依赖的分支掩码
 }
 
@@ -251,7 +251,7 @@ class BruRSEntry extends Bundle with CPUConfig {
   val data = new DataReq
   val robId = RobTag
   val phyRd = PhyTag
-  val snapshotId = SnapshotId
+  val snapshotOH = SnapshotMask
   val snapshotMask = SnapshotMask
   val prediction = new Prediction
   val exception = new Exception

@@ -16,7 +16,7 @@ class RAT extends Module with CPUConfig {
 
     // 来自 BRU 的分支决议
     val branchFlush = Input(Bool())
-    val snapshotId = Input(UInt(4.W)) // 现在是独热码掩码或全 0
+    val snapshotId = Input(UInt(4.W))
     val branchMask = Input(UInt(4.W))
 
     // CDB 广播
@@ -64,7 +64,7 @@ class RAT extends Module with CPUConfig {
   // 快照槽位占用状态（独热码）
   val snapshotsBusy = RegInit(0.U(4.W))
   val snapshotsBusyAfterAlloc = WireDefault(snapshotsBusy)
-  val snapshotsBusyAfterCommit = WireDefault(snapshotsBusy)
+  val snapshotsBusyAfterCommit = WireDefault(snapshotsBusyAfterAlloc)
 
   // 中间组合逻辑变量
   val retirementFreeListAfterCommit = WireDefault(retirementFreeList)
@@ -128,7 +128,7 @@ class RAT extends Module with CPUConfig {
   // 3. 独热码快照分配逻辑
   val allocSnapshotOH = PriorityEncoderOH(~snapshotsBusy) // 找出第一个 0 位，返回独热码
   val hasSnapshotFree = (~snapshotsBusy).orR
-  val currentBranchMask = snapshotsBusy
+  val currentBranchMask = WireDefault(snapshotsBusy)
 
   // 拍摄快照
   when(renameReq.fire && isBranch && hasSnapshotFree) {
@@ -141,6 +141,7 @@ class RAT extends Module with CPUConfig {
       }
     }
     snapshotsBusyAfterAlloc := snapshotsBusy | allocSnapshotOH
+    currentBranchMask := snapshotsBusyAfterCommit
   }
 
   // 4. 回收与冲刷逻辑 (同步更新)
@@ -218,7 +219,7 @@ class RAT extends Module with CPUConfig {
   io.renameRes.bits.rs2Ready := rs2Ready
   io.renameRes.bits.phyRd := allocPhyRd
   // 发送给后端的 ID 也是独热码
-  io.renameRes.bits.snapshotId := Mux(isBranch, allocSnapshotOH, 0.U)
+  io.renameRes.bits.snapshotOH := Mux(isBranch, allocSnapshotOH, 0.U)
   io.renameRes.bits.branchMask := currentBranchMask
 
   io.renameReq.ready := hasFree && hasSnapshotFree
