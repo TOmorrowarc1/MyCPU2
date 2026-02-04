@@ -15,7 +15,6 @@ class RATTest extends AnyFlatSpec with ChiselScalatestTester {
     dut.io.globalFlush.poke(false.B)
     dut.io.branchFlush.poke(false.B)
     dut.io.snapshotId.poke(0.U)
-    dut.io.branchMask.poke(0.U)
     dut.io.renameRes.ready.poke(true.B)
     dut.io.robData.ready.poke(true.B)
     dut.io.cdb.valid.poke(false.B)
@@ -349,6 +348,26 @@ class RATTest extends AnyFlatSpec with ChiselScalatestTester {
       // 普通指令
       setRenameReq(dut, rs1 = 0, rs2 = 0, rd = 1, isBranch = false)
       dut.io.renameRes.bits.branchMask.expect(3.U) // 保持不变
+      dut.clock.step()
+
+      // 分支回收：回收第一个分支（snapshotId = 1）
+      setDefaultInputs(dut)
+      dut.io.snapshotId.poke(1.U)
+      dut.clock.step()
+
+      // 验证分支掩码更新：现在应该只剩下第二个分支
+      setRenameReq(dut, rs1 = 0, rs2 = 0, rd = 0, isBranch = false)
+      dut.io.renameRes.bits.branchMask.expect(2.U) // 0b10
+      dut.clock.step()
+
+      // 再次回收第二个分支
+      setDefaultInputs(dut)
+      dut.io.snapshotId.poke(2.U)
+      dut.clock.step()
+
+      // 验证所有分支已回收
+      setRenameReq(dut, rs1 = 0, rs2 = 0, rd = 0, isBranch = false)
+      dut.io.renameRes.bits.branchMask.expect(0.U) // 无活跃分支
     }
   }
 
@@ -389,8 +408,20 @@ class RATTest extends AnyFlatSpec with ChiselScalatestTester {
     test(new RAT) { dut =>
       setDefaultInputs(dut)
 
+      setRenameReq(dut, rs1 = 1, rs2 = 2, rd = 1, isBranch = false)
+      dut.clock.step()
+
+      setRenameReq(dut, rs1 = 3, rs2 = 4, rd = 2, isBranch = false)
+      dut.clock.step()
+
       // 第一个分支
-      setRenameReq(dut, rs1 = 0, rs2 = 0, rd = 0, isBranch = true)
+      setRenameReq(dut, rs1 = 5, rs2 = 6, rd = 0, isBranch = true)
+      dut.clock.step()
+
+      setRenameReq(dut, rs1 = 1, rs2 = 8, rd = 3, isBranch = false)
+      dut.io.renameRes.bits.phyRs1.expect(32.U)
+      dut.io.renameRes.bits.rs1Ready.expect(false.B)
+      dut.io.renameRes.bits.phyRd.expect(34.U)
       dut.clock.step()
 
       // 第二个分支
@@ -398,7 +429,9 @@ class RATTest extends AnyFlatSpec with ChiselScalatestTester {
       dut.clock.step()
 
       // 修改 RAT
-      setRenameReq(dut, rs1 = 0, rs2 = 0, rd = 1, isBranch = false)
+      setRenameReq(dut, rs1 = 3, rs2 = 0, rd = 1, isBranch = false)
+      dut.io.renameRes.bits.phyRs1.expect(34.U)
+      dut.io.renameRes.bits.phyRd.expect(35.U)
       dut.clock.step()
 
       // 恢复到第一个分支的状态
@@ -408,6 +441,10 @@ class RATTest extends AnyFlatSpec with ChiselScalatestTester {
 
       // 验证恢复后的状态
       // 应该恢复到第一个分支后的状态
+      setRenameReq(dut, rs1 = 1, rs2 = 8, rd = 3, isBranch = false)
+      dut.io.renameRes.bits.phyRs1.expect(32.U)
+      dut.io.renameRes.bits.rs1Ready.expect(false.B)
+      dut.io.renameRes.bits.phyRd.expect(34.U)
     }
   }
 
@@ -423,39 +460,177 @@ class RATTest extends AnyFlatSpec with ChiselScalatestTester {
       setRenameReq(dut, rs1 = 0, rs2 = 0, rd = 0, isBranch = true)
       dut.clock.step()
 
-      // 恢复到第一个分支的状态
+      // 恢复到第二个分支快照的状态
       dut.io.branchFlush.poke(true.B)
-      dut.io.snapshotId.poke(1.U)
+      dut.io.snapshotId.poke(2.U)
       dut.clock.step()
 
       // 验证快照依赖关系恢复
       // 应该只有第一个快照是有效的
+      setRenameReq(dut, rs1 = 0, rs2 = 0, rd = 0, isBranch = false)
+      dut.io.renameRes.bits.branchMask.expect(1.U) // 0b01
     }
   }
 
-  it should "正确回收分支预测成功的快照" in {
+  it should "正确处理复杂快照依赖关系：回收中间分支后更新后续分支掩码" in {
     test(new RAT) { dut =>
       setDefaultInputs(dut)
 
-      // 第一个分支
+      // 创建三个嵌套分支
+      // 分支 1
       setRenameReq(dut, rs1 = 0, rs2 = 0, rd = 0, isBranch = true)
-      val snapshotId1 = 1.U
       dut.clock.step()
 
-      // 第二个分支
+      // 分支 2（依赖分支1）
       setRenameReq(dut, rs1 = 0, rs2 = 0, rd = 0, isBranch = true)
-      val snapshotId2 = 2.U
       dut.clock.step()
 
-      // 分支预测成功，回收第一个快照
-      dut.io.branchMask.poke(snapshotId1)
-      dut.io.snapshotId.poke(snapshotId1)
+      // 分支 3（依赖分支1和分支2）
+      setRenameReq(dut, rs1 = 0, rs2 = 0, rd = 0, isBranch = true)
       dut.clock.step()
 
-      // 验证第一个快照已被回收
-      // 下一个分支应该可以分配到第一个快照槽位
+      // 验证当前分支掩码：三个分支都有效
+      setRenameReq(dut, rs1 = 0, rs2 = 0, rd = 1, isBranch = false)
+      dut.io.renameRes.bits.branchMask.expect(7.U) // 0b111
+      dut.clock.step()
+
+      // 回收中间的分支 2
+      setDefaultInputs(dut)
+      dut.io.snapshotId.poke(2.U)
+      dut.clock.step()
+
+      // 验证分支掩码更新：现在应该只有分支1和分支3有效
+      // 分支3的依赖应该不再包含分支2
+      setRenameReq(dut, rs1 = 0, rs2 = 0, rd = 2, isBranch = false)
+      dut.io.renameRes.bits.branchMask.expect(5.U) // 0b101（分支1和分支3）
+      dut.clock.step()
+
+      // 恢复到分支3，验证分支掩码正确
+      setDefaultInputs(dut)
+      dut.io.branchFlush.poke(true.B)
+      dut.io.snapshotId.poke(4.U) // 分支3的快照ID
+      dut.clock.step()
+
+      // 验证恢复后分支掩码只包含分支1
+      setRenameReq(dut, rs1 = 0, rs2 = 0, rd = 3, isBranch = false)
+      dut.io.renameRes.bits.branchMask.expect(1.U) // 0b001（只有分支1）
+    }
+  }
+
+  it should "正确处理复杂快照依赖关系：连续回收多个分支" in {
+    test(new RAT) { dut =>
+      setDefaultInputs(dut)
+
+      // 创建四个嵌套分支
+      for (i <- 0 until 4) {
+        setRenameReq(dut, rs1 = 0, rs2 = 0, rd = 0, isBranch = true)
+        dut.clock.step()
+      }
+
+      // 验证当前分支掩码：四个分支都有效
+      setRenameReq(dut, rs1 = 0, rs2 = 0, rd = 1, isBranch = false)
+      dut.io.renameRes.bits.branchMask.expect(15.U) // 0b1111
+      dut.clock.step()
+
+      // 连续回收分支2和分支3
+      setDefaultInputs(dut)
+      dut.io.snapshotId.poke(2.U) // 回收分支2
+      dut.clock.step()
+
+      setDefaultInputs(dut)
+      dut.io.snapshotId.poke(4.U) // 回收分支3
+      dut.clock.step()
+
+      // 验证分支掩码：应该只有分支1和分支4有效
+      setRenameReq(dut, rs1 = 0, rs2 = 0, rd = 2, isBranch = false)
+      dut.io.renameRes.bits.branchMask.expect(9.U) // 0b1001（分支1和分支4）
+      dut.clock.step()
+
+      // 恢复到分支4，验证分支掩码正确
+      setDefaultInputs(dut)
+      dut.io.branchFlush.poke(true.B)
+      dut.io.snapshotId.poke(8.U) // 分支4的快照ID
+      dut.clock.step()
+
+      // 验证恢复后分支掩码只包含分支1
+      setRenameReq(dut, rs1 = 0, rs2 = 0, rd = 3, isBranch = false)
+      dut.io.renameRes.bits.branchMask.expect(1.U) // 0b0001（只有分支1）
+    }
+  }
+
+  it should "正确处理复杂快照依赖关系：分支回收后新分支分配" in {
+    test(new RAT) { dut =>
+      setDefaultInputs(dut)
+
+      // 创建三个分支
+      for (i <- 0 until 3) {
+        setRenameReq(dut, rs1 = 0, rs2 = 0, rd = 0, isBranch = true)
+        dut.clock.step()
+      }
+
+      // 验证当前分支掩码
+      setRenameReq(dut, rs1 = 0, rs2 = 0, rd = 1, isBranch = false)
+      dut.io.renameRes.bits.branchMask.expect(7.U) // 0b111
+      dut.clock.step()
+
+      // 回收分支2
+      setDefaultInputs(dut)
+      dut.io.snapshotId.poke(2.U)
+      dut.clock.step()
+
+      // 分配新分支，应该使用分支2的槽位
       setRenameReq(dut, rs1 = 0, rs2 = 0, rd = 0, isBranch = true)
-      dut.io.renameRes.bits.snapshotOH.expect(1.U) // 可以重新分配
+      dut.io.renameRes.bits.snapshotOH.expect(2.U) // 使用快照槽位2
+      dut.clock.step()
+
+      // 验证新分支的分支掩码
+      setRenameReq(dut, rs1 = 0, rs2 = 0, rd = 2, isBranch = false)
+      // 新分支应该依赖分支1和分支3，但不依赖刚分配的新分支
+      dut.io.renameRes.bits.branchMask.expect(5.U) // 0b101（分支1和分支3）
+      dut.clock.step()
+    }
+  }
+
+  it should "正确处理复杂快照依赖关系：分支回收与RAT状态一致性" in {
+    test(new RAT) { dut =>
+      setDefaultInputs(dut)
+
+      // 分支1
+      setRenameReq(dut, rs1 = 0, rs2 = 0, rd = 0, isBranch = true)
+      dut.clock.step()
+
+      // 分支1后修改RAT
+      setRenameReq(dut, rs1 = 0, rs2 = 0, rd = 1, isBranch = false)
+      dut.clock.step()
+
+      // 分支2
+      setRenameReq(dut, rs1 = 0, rs2 = 0, rd = 0, isBranch = true)
+      dut.clock.step()
+
+      // 分支2后修改RAT
+      setRenameReq(dut, rs1 = 0, rs2 = 0, rd = 1, isBranch = false)
+      dut.clock.step()
+
+      // 回收分支1
+      setDefaultInputs(dut)
+      dut.io.snapshotId.poke(1.U)
+      dut.clock.step()
+
+      // 验证RAT状态：x1应该映射到33（分支2后的状态）
+      setRenameReq(dut, rs1 = 1, rs2 = 0, rd = 3, isBranch = false)
+      dut.io.renameRes.bits.phyRs1.expect(33.U)
+      dut.clock.step()
+
+      // 恢复到分支2，验证RAT状态正确
+      setDefaultInputs(dut)
+      dut.io.branchFlush.poke(true.B)
+      dut.io.snapshotId.poke(2.U)
+      dut.clock.step()
+
+      // 验证RAT状态：x1应该映射到32，x4应该映射到33
+      setRenameReq(dut, rs1 = 1, rs2 = 2, rd = 4, isBranch = false)
+      dut.io.renameRes.bits.phyRs1.expect(32.U)
+      dut.io.renameRes.bits.phyRd.expect(33.U)
     }
   }
 

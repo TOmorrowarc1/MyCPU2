@@ -17,7 +17,6 @@ class RAT extends Module with CPUConfig {
     // 来自 BRU 的分支决议
     val branchFlush = Input(Bool())
     val snapshotId = Input(UInt(4.W))
-    val branchMask = Input(UInt(4.W))
 
     // CDB 广播
     val cdb = Flipped(Decoupled(new Bundle {
@@ -76,11 +75,15 @@ class RAT extends Module with CPUConfig {
   val snapshotsFreeListsAfterCommit = Wire(Vec(4, UInt(128.W)))
   val snapshotsReadyListsAfterAlloc = Wire(Vec(4, UInt(128.W)))
   val snapshotsReadyListsAfterBroadcast = Wire(Vec(4, UInt(128.W)))
+  val snapshotsMasksAfterAlloc = Wire(Vec(4, UInt(4.W)))
+  val snapshotsMasksAfterCommit = Wire(Vec(4, UInt(4.W)))
   for (i <- 0 until 4) {
     snapshotsFreeListsAfterAlloc(i) := snapshots(i).freeList
     snapshotsFreeListsAfterCommit(i) := snapshotsFreeListsAfterAlloc(i)
     snapshotsReadyListsAfterAlloc(i) := snapshots(i).readyList
     snapshotsReadyListsAfterBroadcast(i) := snapshotsReadyListsAfterAlloc(i)
+    snapshotsMasksAfterAlloc(i) := snapshots(i).snapshotsBusy
+    snapshotsMasksAfterCommit(i) := snapshotsMasksAfterAlloc(i)
   }
   val retirementRatAfterCommit = WireDefault(retirementRat)
 
@@ -141,7 +144,7 @@ class RAT extends Module with CPUConfig {
         snapshots(i).rat := frontendRat
         snapshotsFreeListsAfterAlloc(i) := frontendFreeListAfterCommit
         snapshotsReadyListsAfterAlloc(i) := frontendReadyListAfterBroadcast
-        snapshots(i).snapshotsBusy := snapshotsBusy // 记录当前已存在的快照依赖
+        snapshotsMasksAfterAlloc(i) := snapshotsBusy
       }
     }
     snapshotsBusyAfterAlloc := snapshotsBusy | allocSnapshotOH
@@ -187,13 +190,6 @@ class RAT extends Module with CPUConfig {
     // 清空所有快照
     snapshotsBusy := 0.U
   }.otherwise {
-    // 默认行为：接受提交更新
-    retirementRat := retirementRatAfterCommit
-    retirementFreeList := retirementFreeListAfterCommit
-    for (i <- 0 until 4) {
-      snapshots(i).freeList := snapshotsFreeListsAfterCommit(i)
-      snapshots(i).readyList := snapshotsReadyListsAfterBroadcast(i)
-    }
     // Branch Flush 与 Branch 回收
     when(io.branchFlush) {
       // 1. 分支预测失败恢复
@@ -209,13 +205,29 @@ class RAT extends Module with CPUConfig {
     }.otherwise {
       // 2. 正常运行逻辑
       // 只有在无 Flush 的情况下才从分配上更新 Frontend RAT
-      when(renameReq.fire && rd =/= 0.U) { frontendRat(rd) := allocPhyRd }
+      when(renameReq.fire && rd =/= 0.U) {
+        printf(p"RAT: Renaming ARF ${rd} to Phy ${allocPhyRd}\n")
+        frontendRat(rd) := allocPhyRd
+      }
       frontendFreeList := frontendFreeListAfterCommit
       frontendReadyList := frontendReadyListAfterBroadcast
-      when(io.branchMask =/= 0.U) {
+      when(io.snapshotId =/= 0.U) {
         snapshotsBusyAfterCommit := snapshotsBusyAfterAlloc & ~io.snapshotId
+        for (i <- 0 until 4) {
+          snapshotsMasksAfterCommit(i) := snapshotsMasksAfterAlloc(
+            i
+          ) & ~io.snapshotId
+        }
       }
       snapshotsBusy := snapshotsBusyAfterCommit
+    }
+    // 默认行为：接受提交更新
+    retirementRat := retirementRatAfterCommit
+    retirementFreeList := retirementFreeListAfterCommit
+    for (i <- 0 until 4) {
+      snapshots(i).freeList := snapshotsFreeListsAfterCommit(i)
+      snapshots(i).readyList := snapshotsReadyListsAfterBroadcast(i)
+      snapshots(i).snapshotsBusy := snapshotsMasksAfterCommit(i)
     }
   }
 
