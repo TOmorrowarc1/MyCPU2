@@ -737,14 +737,19 @@ class RATTest extends AnyFlatSpec with ChiselScalatestTester {
       dut.clock.step()
 
       // 提交指令，回收物理寄存器 1
+      setDefaultInputs(dut)
+      setRenameReq(dut, rs1 = 1, rs2 = 3, rd = 2, isBranch = false)
       setCommit(dut, archRd = 1, phyRd = 32, preRd = 1)
+      dut.io.renameRes.bits.phyRs1.expect(32.U)
+      dut.io.renameRes.bits.rs2Ready.expect(true.B)
+      dut.io.renameRes.bits.phyRd.expect(33.U)
       dut.clock.step()
 
       // 验证物理寄存器 1 已被回收
-      // 下一次分配应该可以重新使用物理寄存器 1
       // 但实际上，由于我们分配的是新的物理寄存器，所以应该是 33
+      setDefaultInputs(dut)
       setRenameReq(dut, rs1 = 0, rs2 = 0, rd = 2, isBranch = false)
-      dut.io.renameRes.bits.phyRd.expect(33.U)
+      dut.io.renameRes.bits.phyRd.expect(1.U)
     }
   }
 
@@ -781,6 +786,14 @@ class RATTest extends AnyFlatSpec with ChiselScalatestTester {
       // 验证 x0 的映射没有改变
       setRenameReq(dut, rs1 = 0, rs2 = 0, rd = 1, isBranch = false)
       dut.io.renameRes.bits.phyRs1.expect(0.U)
+
+      // 尝试分配 x0
+      setRenameReq(dut, rs1 = 2, rs2 = 1, rd = 0, isBranch = false)
+      dut.io.renameRes.bits.phyRd.expect(0.U)
+
+      // 验证 x0 的映射没有改变
+      setRenameReq(dut, rs1 = 0, rs2 = 2, rd = 1, isBranch = false)
+      dut.io.renameRes.bits.phyRs1.expect(0.U)
     }
   }
 
@@ -788,25 +801,32 @@ class RATTest extends AnyFlatSpec with ChiselScalatestTester {
     test(new RAT) { dut =>
       setDefaultInputs(dut)
 
-      // 分配快照
-      setRenameReq(dut, rs1 = 0, rs2 = 0, rd = 0, isBranch = true)
-      dut.clock.step()
-
       // 分配物理寄存器
       setRenameReq(dut, rs1 = 0, rs2 = 0, rd = 1, isBranch = false)
       dut.clock.step()
 
-      // 提交指令，回收物理寄存器 1
-      setCommit(dut, archRd = 1, phyRd = 32, preRd = 1)
+      // 分配快照
+      setRenameReq(dut, rs1 = 0, rs2 = 0, rd = 0, isBranch = true)
       dut.clock.step()
 
-      // 分支预测失败，恢复快照
+      setDefaultInputs(dut)
+      setBroadcast(dut, phyRd = 32)
+      dut.clock.step()
+
+      // 分支预测失败，恢复快照，同时进行提交
+      setDefaultInputs(dut)
       dut.io.branchFlush.poke(true.B)
       dut.io.snapshotId.poke(1.U)
+      setCommit(dut, archRd = 1, phyRd = 32, preRd = 1)
       dut.clock.step()
 
       // 验证恢复后的状态
       // 物理寄存器 1 应该已经被回收
+      setDefaultInputs(dut)
+      setRenameReq(dut, rs1 = 1, rs2 = 0, rd = 2, isBranch = false)
+      dut.io.renameRes.bits.phyRs1.expect(32.U)
+      dut.io.renameRes.bits.phyRd.expect(1.U)
+      dut.io.renameRes.bits.rs1Ready.expect(true.B)
     }
   }
 
@@ -838,7 +858,7 @@ class RATTest extends AnyFlatSpec with ChiselScalatestTester {
 
       // 分支 2 预测失败，恢复到分支 1 后的状态
       dut.io.branchFlush.poke(true.B)
-      dut.io.snapshotId.poke(1.U)
+      dut.io.snapshotId.poke("b10".U)
       dut.clock.step()
 
       // 验证恢复后的状态
@@ -871,7 +891,7 @@ class RATTest extends AnyFlatSpec with ChiselScalatestTester {
       // 验证恢复后的状态
       // 物理寄存器 1 应该已经被回收
       setRenameReq(dut, rs1 = 0, rs2 = 0, rd = 2, isBranch = false)
-      dut.io.renameRes.bits.phyRd.expect(33.U) // 下一个可用的物理寄存器
+      dut.io.renameRes.bits.phyRd.expect(1.U)
     }
   }
 
@@ -996,8 +1016,7 @@ class RATTest extends AnyFlatSpec with ChiselScalatestTester {
       // 同一周期内 CDB 广播，应该触发 bypass forwarding
       dut.io.cdb.valid.poke(true.B)
       dut.io.cdb.bits.phyRd.poke(phyRd)
-      // 由于 bypass forwarding 是组合逻辑，应该在同一周期生效
-      // 但由于 Chisel 的特性，可能需要在下一个周期验证
+      dut.io.renameRes.bits.rs1Ready.expect(true.B)
     }
   }
 

@@ -254,6 +254,4 @@ class RAT extends Module with CPUConfig {
 
   io.commit.ready := true.B
   io.cdb.ready := true.B
-  printf(p"frontend RAT: ${frontendRat}\n")
-  printf(p"retirement RAT: ${retirementRat}\n")
 }
