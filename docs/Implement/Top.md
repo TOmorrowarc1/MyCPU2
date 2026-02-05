@@ -52,8 +52,8 @@
 ## 2. Backend
 
 ### 2.1 RS (Reservation Stations)
-*   **组成**：分布式分布，由 ALURS 与 BRURS 组成。
-*   **职责**：接收 Decoder 送入的控制方面信息与来自 RAT 的数据相关信息，dispatch 到各个执行单元。维护因数据冒险与结构冒险暂时无法执行的指令队列，其中ALU 与 BRU 在对应 RS 中维护而 LSU 自主维护，RS 模块只负责分派。
+*   **组成**：由 Dispatcher、ALURS 与 BRURS 组成。
+*   **职责**：接收 Decoder 送入的控制方面信息与来自 RAT 的数据相关信息，dispatch 到各个执行单元。维护因数据冒险与结构冒险暂时无法执行的指令队列，其中 ALU 与 BRU 在对应 RS 中维护；Load/Store 指令由 LSU 自主维护，Zicsr 与其他特权级相关指令由 ZicsrU 维护，RS 模块只负责分派。
 *   **输入**：
     *   来自 Decoder 的 `{MinOps, Exceptions, RobID, Prediction, PC, Imm, privMode}`。
     *   来自 RAT 的 `{Data, BranchMask}`。
@@ -61,13 +61,13 @@
     *   来自 ROB 的 `GlobalFlush`。
     *   来自 BRU 的 `BranchFlush` 与 `BranchMask`。
 *   **逻辑简述**：
-    *   **接收并分派**：从 Decoder 接收 `{MinOps, Exceptions, RobID, Prediction}`，从 RAT 接收 `{Data, BranchMask}`，利用 `MinOps` 中指令 opcode 进行分派，到 4 个 EU 中的对应 RS 或 Queue。
-    *   **监听**：在对应 RS 中存储指令控制信息，数据合法与否。时刻比对 CBD 上的 `ResultReg`。若匹配则将对应数据置为 valid。
-    *   **发射**：RS 使用 FIFO，当一条指令的所有操作数都 valid ，即该指令valid 且对应 EU ready 时将最早的指令需要的源寄存器值从 PRF 中取出，发送到 EU 中求取结果。
-    *   **冲刷**：如果 ROB 将 `GlobalFlush` 信号拉高，则立刻通过 busy 位置 0 方式冲刷所有指令。如果 BRU 拉高 `BranchFlush` 则根据 `BranchMask` 进行位运算，找出依赖于对应分支指令并清理。
+    *   **接收并分派**：从 Decoder 接收 `{MinOps, Exceptions, RobID, Prediction}`，从 RAT 接收 `{Data, BranchMask}`，Dispatcher 利用 `MinOps` 中指令 opcode 进行分派，将信息发送到 4 个 EU 中的对应 RS 或 Queue。
+    *   **监听**：在对应 RS 中存储指令控制与数据有关信息。时刻比对 CBD 上的 `ResultReg`。若匹配则将对应数据置为 valid。
+    *   **发射**：RS 使用 Waiting Pool，当一条指令的所有操作数都 valid ，即该指令 valid 且对应 EU ready 时将最早的指令需要的源寄存器值从 PRF 中取出，发送到 EU 中求取结果。
+    *   **冲刷**：如果 ROB 将 `GlobalFlush` 信号拉高，则立刻通过将 busy 位置 0 方式冲刷所有指令。如果 BRU 拉高 `BranchFlush` 则根据 `BranchMask` 进行位运算，找出依赖于对应分支指令并清理。
 *   **输出**：
     *   向 PRF 发送 `{SourceReg1, SourceReg2}`。
-    *   向 EU 发送 `{Opcode, Data, RobID, Prediction}`。   
+    *   向 EU 发送对应 `{Opcode, Data, RobID, Prediction}`。   
 
 ### 2.2 ALU (Arithmetic Logic Unit)
 *   **职责**：执行整数算术与逻辑运算。

@@ -192,7 +192,7 @@ class RenameReq extends Bundle with CPUConfig {
 }
 
 // RAT -> ROB (ROB 占位：数据部分)
-class ROBinitDataPacket extends Bundle with CPUConfig {
+class ROBinitData extends Bundle with CPUConfig {
   val archRd    = ArchTag
   val phyRd     = PhyTag
   val phyOld    = PhyTag
@@ -200,7 +200,7 @@ class ROBinitDataPacket extends Bundle with CPUConfig {
 }
 
 // RAT -> Dispatch (重命名结果)
-class RenameResPacket extends Bundle with CPUConfig {
+class RenameRes extends Bundle with CPUConfig {
   val phyRs1      = PhyTag // 源寄存器1 物理号
   val rs1Busy     = Bool() // 源寄存器1 是否 Busy (RS 判断是否需要监听 CDB)
   val phyRs2      = PhyTag
@@ -236,23 +236,25 @@ class DataReq extends Bundle with CPUConfig {
 }
 
 class AluRSEntry extends Bundle with CPUConfig {
-  val aluOp      = ALUOp()
-  val data = new DataReq
-  val robId     = RobTag
-  val phyRd    = PhyTag
-  val snapshotMask = SnapshotMask
-  val exception = new Exception
+  val busy        = Bool()
+  val aluOp       = ALUOp()
+  val data        = new DataReq
+  val robId       = RobTag
+  val phyRd       = PhyTag
+  val branchMask  = SnapshotMask
+  val exception   = new Exception
 }
 
 class BruRSEntry extends Bundle with CPUConfig {
-  val bruOp      = BRUOp()
-  val data = new DataReq
-  val robId     = RobTag
-  val phyRd    = PhyTag
-  val snapshotId = UInt(SnapshotIdWidth.W)
-  val snapshotMask = SnapshotMask
-  val prediction = new Prediction
-  val exception = new Exception
+  val busy        = Bool()
+  val bruOp       = BRUOp()
+  val data        = new DataReq
+  val robId       = RobTag
+  val phyRd       = PhyTag
+  val snapshotId  = UInt(SnapshotIdWidth.W)
+  val branchMask  = SnapshotMask
+  val prediction  = new Prediction
+  val exception   = new Exception
 }
 ```
 
