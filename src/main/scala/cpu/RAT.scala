@@ -27,7 +27,7 @@ class RAT extends Module with CPUConfig {
     val renameRes = Decoupled(new RenameRes)
 
     // 输出到 ROB 的数据包
-    val robData = Decoupled(new ROBinitDataPacket)
+    val robData = Decoupled(new ROBinitData)
   })
 
   // 1. 维护信息

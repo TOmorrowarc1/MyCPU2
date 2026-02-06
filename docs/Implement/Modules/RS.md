@@ -43,6 +43,7 @@ class DispatchPacket extends Bundle with CPUConfig {
   val microOp   = new MicroOp
   val pc        = AddrW
   val imm       = DataW
+  val csrAddr   = CsrAddrW
   val privMode  = PrivMode()
   val prediction = new Prediction
   val exception  = new Exception
@@ -54,12 +55,12 @@ class DispatchPacket extends Bundle with CPUConfig {
 ```scala
 class RenameRes extends Bundle with CPUConfig {
   val phyRs1      = PhyTag      // 源寄存器1 物理号
-  val rs1Busy     = Bool()      // 源寄存器1 是否 Busy
+  val rs1Ready    = Bool()      // 源寄存器1 数据是否 ready (用于 CDB 旁路)
   val phyRs2      = PhyTag      // 源寄存器2 物理号
-  val rs2Busy     = Bool()      // 源寄存器2 是否 Busy
+  val rs2Ready    = Bool()      // 源寄存器2 数据是否 ready (用于 CDB 旁路)
   val phyRd       = PhyTag      // 目标寄存器 物理号
-  val snapshotId  = UInt(SnapshotIdWidth.W) // 分配的快照 ID (分支专用)
-  val branchMask  = SnapshotMask            // 当前依赖的分支掩码
+  val snapshotOH  = SnapshotMask // 分配的快照 ID (分支专用)
+  val branchMask  = SnapshotMask // 当前依赖的分支掩码
 }
 ```
 
@@ -95,7 +96,7 @@ class BruRSDispatch extends Bundle with CPUConfig {
   val data        = new DataReq
   val robId       = RobTag
   val phyRd       = PhyTag
-  val snapshotId  = UInt(SnapshotIdWidth.W)
+  val snapshotOH  = SnapshotMask
   val branchMask  = SnapshotMask
   val prediction  = new Prediction
   val exception   = new Exception
@@ -128,10 +129,10 @@ Dispatcher 需要将 Decoder 和 RAT 的信息整合为完整的指令数据包�
 val dataReq = Wire(new DataReq)
 dataReq.src1Sel := io.decoder.bits.microOp.op1Src
 dataReq.src1Tag := io.rat.bits.phyRs1
-dataReq.src1Busy := io.rat.bits.rs1Busy
+dataReq.src1Busy := !io.rat.bits.rs1Ready
 dataReq.src2Sel := io.decoder.bits.microOp.op2Src
 dataReq.src2Tag := io.rat.bits.phyRs2
-dataReq.src2Busy := io.rat.bits.rs2Busy
+dataReq.src2Busy := !io.rat.bits.rs2Ready
 dataReq.imm := io.decoder.bits.imm
 dataReq.pc := io.decoder.bits.pc
 ```
@@ -184,7 +185,7 @@ io.bruRS.bits.bruOp := io.decoder.bits.microOp.bruOp
 io.bruRS.bits.data := dataReq
 io.bruRS.bits.robId := io.decoder.bits.robId
 io.bruRS.bits.phyRd := io.rat.bits.phyRd
-io.bruRS.bits.snapshotId := io.rat.bits.snapshotId
+io.bruRS.bits.snapshotOH := io.rat.bits.snapshotOH
 io.bruRS.bits.branchMask := io.rat.bits.branchMask
 io.bruRS.bits.prediction := io.decoder.bits.prediction
 io.bruRS.bits.exception := io.decoder.bits.exception
@@ -470,7 +471,7 @@ class BruRSEntry extends Bundle with CPUConfig {
   val data = new DataReq
   val robId = RobTag
   val phyRd = PhyTag
-  val snapshotId = UInt(SnapshotIdWidth.W)
+  val snapshotOH = SnapshotMask
   val branchMask = SnapshotMask
   val prediction = new Prediction
   val exception = new Exception
@@ -505,7 +506,7 @@ when (io.enq.fire) {
   newEntry.data := io.enq.bits.data
   newEntry.robId := io.enq.bits.robId
   newEntry.phyRd := io.enq.bits.phyRd
-  newEntry.snapshotId := io.enq.bits.snapshotId
+  newEntry.snapshotOH := io.enq.bits.snapshotOH
   newEntry.branchMask := io.enq.bits.branchMask
   newEntry.prediction := io.enq.bits.prediction
   newEntry.exception := io.enq.bits.exception

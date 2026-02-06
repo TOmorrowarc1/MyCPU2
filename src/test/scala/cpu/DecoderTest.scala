@@ -55,7 +55,7 @@ class DecoderTest extends AnyFlatSpec with ChiselScalatestTester {
 
       dut.io.robInit.valid.expect(true.B)
       dut.io.robInit.bits.pc.expect(0x80000000L.U)
-      dut.io.robInit.bits.isSpecialInstr.expect(SpecialInstr.NONE)
+      dut.io.robInit.bits.specialInstr.expect(SpecialInstr.NONE)
       dut.io.robInit.bits.exception.valid.expect(false.B)
 
       dut.io.dispatch.valid.expect(true.B)
@@ -357,7 +357,7 @@ class DecoderTest extends AnyFlatSpec with ChiselScalatestTester {
       dut.io.renameReq.bits.isBranch.expect(true.B)
 
       dut.io.robInit.valid.expect(true.B)
-      dut.io.robInit.bits.isSpecialInstr.expect(SpecialInstr.BRANCH)
+      dut.io.robInit.bits.specialInstr.expect(SpecialInstr.BRANCH)
     }
   }
 
@@ -438,7 +438,7 @@ class DecoderTest extends AnyFlatSpec with ChiselScalatestTester {
       dut.io.renameReq.bits.isBranch.expect(true.B)
 
       dut.io.robInit.valid.expect(true.B)
-      dut.io.robInit.bits.isSpecialInstr.expect(SpecialInstr.BRANCH)
+      dut.io.robInit.bits.specialInstr.expect(SpecialInstr.BRANCH)
     }
   }
 
@@ -551,7 +551,7 @@ class DecoderTest extends AnyFlatSpec with ChiselScalatestTester {
       dut.io.renameReq.bits.rs1.expect(1.U)
       dut.io.renameReq.bits.rs2.expect(3.U)
       dut.io.renameReq.bits.isBranch.expect(false.B)
-      dut.io.robInit.bits.isSpecialInstr.expect(SpecialInstr.STORE)
+      dut.io.robInit.bits.specialInstr.expect(SpecialInstr.STORE)
     }
   }
 
@@ -589,7 +589,7 @@ class DecoderTest extends AnyFlatSpec with ChiselScalatestTester {
       // FENCE: 0x0ff0000f
       dut.io.in.bits.inst.poke(0x0ff0000fL.U)
 
-      dut.io.robInit.bits.isSpecialInstr.expect(SpecialInstr.FENCE)
+      dut.io.robInit.bits.specialInstr.expect(SpecialInstr.FENCE)
       dut.io.dispatch.bits.microOp.aluOp.expect(ALUOp.NOP)
       dut.io.dispatch.bits.microOp.op1Src.expect(Src1Sel.ZERO)
       dut.io.dispatch.bits.microOp.op2Src.expect(Src2Sel.FOUR)
@@ -608,7 +608,7 @@ class DecoderTest extends AnyFlatSpec with ChiselScalatestTester {
       // FENCE.I: 0x0000100f
       dut.io.in.bits.inst.poke(0x0000100fL.U)
 
-      dut.io.robInit.bits.isSpecialInstr.expect(SpecialInstr.FENCEI)
+      dut.io.robInit.bits.specialInstr.expect(SpecialInstr.FENCEI)
       dut.io.dispatch.bits.microOp.aluOp.expect(ALUOp.NOP)
       dut.io.dispatch.bits.microOp.op1Src.expect(Src1Sel.ZERO)
       dut.io.dispatch.bits.microOp.op2Src.expect(Src2Sel.FOUR)
@@ -627,7 +627,7 @@ class DecoderTest extends AnyFlatSpec with ChiselScalatestTester {
       // CSRRW x1, mstatus, x2: 0x300110F3 (csr=0x300, rs1=2, rd=1)
       dut.io.in.bits.inst.poke(0x300110f3L.U)
 
-      dut.io.robInit.bits.isSpecialInstr.expect(SpecialInstr.CSR)
+      dut.io.robInit.bits.specialInstr.expect(SpecialInstr.CSR)
       dut.io.dispatch.bits.microOp.zicsrOp.expect(ZicsrOp.RW)
       dut.io.dispatch.bits.microOp.op1Src.expect(Src1Sel.REG)
       dut.io.dispatch.bits.microOp.op2Src.expect(Src2Sel.FOUR)
@@ -644,7 +644,7 @@ class DecoderTest extends AnyFlatSpec with ChiselScalatestTester {
       // CSRRS x1, mstatus, x2: 0x300120F3
       dut.io.in.bits.inst.poke(0x300120f3L.U)
 
-      dut.io.robInit.bits.isSpecialInstr.expect(SpecialInstr.CSR)
+      dut.io.robInit.bits.specialInstr.expect(SpecialInstr.CSR)
       dut.io.dispatch.bits.microOp.zicsrOp.expect(ZicsrOp.RS)
     }
   }
@@ -657,7 +657,7 @@ class DecoderTest extends AnyFlatSpec with ChiselScalatestTester {
       // CSRRC x1, mstatus, x2: 0x300130F3
       dut.io.in.bits.inst.poke(0x300130f3L.U)
 
-      dut.io.robInit.bits.isSpecialInstr.expect(SpecialInstr.CSR)
+      dut.io.robInit.bits.specialInstr.expect(SpecialInstr.CSR)
       dut.io.dispatch.bits.microOp.zicsrOp.expect(ZicsrOp.RC)
     }
   }
@@ -670,7 +670,7 @@ class DecoderTest extends AnyFlatSpec with ChiselScalatestTester {
       // CSRRWI x1, mstatus, 2: 0x300150F3 (csr=0x300, uimm=5, rd=1)
       dut.io.in.bits.inst.poke(0x300150f3L.U)
 
-      dut.io.robInit.bits.isSpecialInstr.expect(SpecialInstr.CSR)
+      dut.io.robInit.bits.specialInstr.expect(SpecialInstr.CSR)
       dut.io.dispatch.bits.microOp.zicsrOp.expect(ZicsrOp.RW)
       dut.io.dispatch.bits.microOp.op1Src.expect(Src1Sel.ZERO)
       dut.io.dispatch.bits.imm.expect(2.U)
@@ -685,7 +685,7 @@ class DecoderTest extends AnyFlatSpec with ChiselScalatestTester {
       // CSRRSI x1, mstatus, 2: 0x300160F3
       dut.io.in.bits.inst.poke(0x300160f3L.U)
 
-      dut.io.robInit.bits.isSpecialInstr.expect(SpecialInstr.CSR)
+      dut.io.robInit.bits.specialInstr.expect(SpecialInstr.CSR)
       dut.io.dispatch.bits.microOp.zicsrOp.expect(ZicsrOp.RS)
     }
   }
@@ -698,7 +698,7 @@ class DecoderTest extends AnyFlatSpec with ChiselScalatestTester {
       // CSRRCI x1, mstatus, 2: 0x300170F3
       dut.io.in.bits.inst.poke(0x300170f3L.U)
 
-      dut.io.robInit.bits.isSpecialInstr.expect(SpecialInstr.CSR)
+      dut.io.robInit.bits.specialInstr.expect(SpecialInstr.CSR)
       dut.io.dispatch.bits.microOp.zicsrOp.expect(ZicsrOp.RC)
     }
   }
@@ -715,7 +715,7 @@ class DecoderTest extends AnyFlatSpec with ChiselScalatestTester {
       // ECALL: 0x00000073
       dut.io.in.bits.inst.poke(0x00000073L.U)
 
-      dut.io.robInit.bits.isSpecialInstr.expect(SpecialInstr.ECALL)
+      dut.io.robInit.bits.specialInstr.expect(SpecialInstr.ECALL)
       dut.io.robInit.bits.exception.valid.expect(true.B)
       dut.io.robInit.bits.exception.cause
         .expect(ExceptionCause.ECALL_FROM_M_MODE)
@@ -739,7 +739,7 @@ class DecoderTest extends AnyFlatSpec with ChiselScalatestTester {
       // EBREAK: 0x00100073
       dut.io.in.bits.inst.poke(0x00100073L.U)
 
-      dut.io.robInit.bits.isSpecialInstr.expect(SpecialInstr.EBREAK)
+      dut.io.robInit.bits.specialInstr.expect(SpecialInstr.EBREAK)
       dut.io.robInit.bits.exception.valid.expect(true.B)
       dut.io.robInit.bits.exception.cause.expect(ExceptionCause.BREAKPOINT)
       dut.io.robInit.bits.exception.tval.expect(0x80000000L.U)
@@ -755,7 +755,7 @@ class DecoderTest extends AnyFlatSpec with ChiselScalatestTester {
       // MRET: 0x30200073
       dut.io.in.bits.inst.poke(0x30200073L.U)
 
-      dut.io.robInit.bits.isSpecialInstr.expect(SpecialInstr.MRET)
+      dut.io.robInit.bits.specialInstr.expect(SpecialInstr.MRET)
     }
   }
 
@@ -767,7 +767,7 @@ class DecoderTest extends AnyFlatSpec with ChiselScalatestTester {
       // SRET: 0x10200073
       dut.io.in.bits.inst.poke(0x10200073L.U)
 
-      dut.io.robInit.bits.isSpecialInstr.expect(SpecialInstr.SRET)
+      dut.io.robInit.bits.specialInstr.expect(SpecialInstr.SRET)
     }
   }
 
@@ -779,7 +779,7 @@ class DecoderTest extends AnyFlatSpec with ChiselScalatestTester {
       // WFI: 0x10500073
       dut.io.in.bits.inst.poke(0x10500073L.U)
 
-      dut.io.robInit.bits.isSpecialInstr.expect(SpecialInstr.WFI)
+      dut.io.robInit.bits.specialInstr.expect(SpecialInstr.WFI)
     }
   }
 
@@ -791,7 +791,7 @@ class DecoderTest extends AnyFlatSpec with ChiselScalatestTester {
       // SFENCE.VMA x1, x2: 0x12000073
       dut.io.in.bits.inst.poke(0x12000073L.U)
 
-      dut.io.robInit.bits.isSpecialInstr.expect(SpecialInstr.SFENCE)
+      dut.io.robInit.bits.specialInstr.expect(SpecialInstr.SFENCE)
     }
   }
 

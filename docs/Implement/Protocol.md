@@ -178,6 +178,7 @@ class DispatchPacket extends Bundle with CPUConfig {
   val microOp   = new MicroOp
   val pc        = AddrW
   val imm       = DataW
+  val csrAddr   = CsrAddrW
   val privMode  = PrivMode()
   val prediction = new Prediction
   val exception  = new Exception
@@ -202,28 +203,22 @@ class ROBinitData extends Bundle with CPUConfig {
 // RAT -> Dispatch (重命名结果)
 class RenameRes extends Bundle with CPUConfig {
   val phyRs1      = PhyTag // 源寄存器1 物理号
-  val rs1Busy     = Bool() // 源寄存器1 是否 Busy (RS 判断是否需要监听 CDB)
+  val rs1Ready    = Bool() // 源寄存器1 数据是否 ready (用于 CDB 旁路)
   val phyRs2      = PhyTag
-  val rs2Busy     = Bool()
+  val rs2Ready    = Bool() // 源寄存器2 数据是否 ready (用于 CDB 旁路)
   val phyRd       = PhyTag // 目标寄存器 物理号
-  val snapshotId  = UInt(SnapshotIdWidth.W) // 分配的快照 ID (分支专用)
+  val snapshotOH  = SnapshotMask // 分配的快照 ID (分支专用)
   val branchMask  = SnapshotMask            // 当前依赖的分支掩码
 }
 ```
 
-## 3. 分派与重命名 (Dispatch & Rename Interfaces)
+## 3. 分派 (Dispatch)
 
-这里体现了乱序执行的核心数据流：RAT 和 ROB 填充信息后，打包发给 Dispatch 单元 再写入 RS。
+分派阶段与后端乱序执行模块之间的信息包定义如下：
 
 ```scala
-// Dispatch 接口 (组合来自 Decoder, RAT 的信息)
-class DispatchIO extends Bundle with CPUConfig {
-  val Decoder = new DispatchPacket
-  val RAT     = new RenameResPacket
-}
 
 // Dispatch -> RS
-// 应当在 RS 内部定义如下数据包，但是为了解析复杂数据流放在此处。
 class DataReq extends Bundle with CPUConfig {
   val src1Sel    = Src1Sel()
   val src1Tag    = PhyTag
@@ -235,8 +230,8 @@ class DataReq extends Bundle with CPUConfig {
   val pc         = AddrW
 }
 
-class AluRSEntry extends Bundle with CPUConfig {
-  val busy        = Bool()
+// Dispatch -> ALU RS
+class AluRSDispatch extends Bundle with CPUConfig {
   val aluOp       = ALUOp()
   val data        = new DataReq
   val robId       = RobTag
@@ -245,13 +240,13 @@ class AluRSEntry extends Bundle with CPUConfig {
   val exception   = new Exception
 }
 
-class BruRSEntry extends Bundle with CPUConfig {
-  val busy        = Bool()
+// Dispatch -> BRU RS
+class BruRSDispatch extends Bundle with CPUConfig {
   val bruOp       = BRUOp()
   val data        = new DataReq
   val robId       = RobTag
   val phyRd       = PhyTag
-  val snapshotId  = UInt(SnapshotIdWidth.W)
+  val snapshotOH  = SnapshotMask
   val branchMask  = SnapshotMask
   val prediction  = new Prediction
   val exception   = new Exception
@@ -260,7 +255,7 @@ class BruRSEntry extends Bundle with CPUConfig {
 
 ## 4. 后端执行 (Backend: Issue, PRF, EU)
 
-采用了 **Explicit Register Renaming** 风格（发射后读 PRF）。
+注意：发射后读 PRF。
 
 ```scala
 // RS -> PRF 
@@ -306,12 +301,12 @@ class BruReq extends Bundle with CPUConfig {
 
 // Issue Stage -> EU (组合数据包)
 // 包含：控制信号 + 操作数(来自PRF/Imm/PC) + Tag
-class AluPacket extends Bundle with CPUConfig {
+class AluDrivenPacket extends Bundle with CPUConfig {
   val aluReq = new AluReq
   val prfData = new PrfReadData
 }
 
-class BruPacket extends Bundle with CPUConfig {
+class BruDrivenPacket extends Bundle with CPUConfig {
   val bruReq = new BruReq
   val prfData = new PrfReadData
 }

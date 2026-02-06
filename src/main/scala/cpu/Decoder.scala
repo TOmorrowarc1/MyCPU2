@@ -273,7 +273,7 @@ class Decoder extends Module with CPUConfig {
   io.robInit.bits.pc := pc
   io.robInit.bits.prediction := prediction
   io.robInit.bits.exception := finalException
-  io.robInit.bits.isSpecialInstr := specialInstr
+  io.robInit.bits.specialInstr := specialInstr
 
   // 分派包
   io.dispatch.valid := decoderValid && !hasException
