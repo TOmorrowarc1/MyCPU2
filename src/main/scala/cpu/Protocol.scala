@@ -287,6 +287,7 @@ class PrfReadData extends Bundle with CPUConfig {
 class IssueMetaPacket extends Bundle with CPUConfig {
   val robId = RobTag
   val phyRd = PhyTag
+  val branchMask = SnapshotMask
 }
 
 class IssueDataPacket extends Bundle with CPUConfig {
