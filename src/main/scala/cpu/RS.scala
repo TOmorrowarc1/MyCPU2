@@ -3,10 +3,6 @@ package cpu
 import chisel3._
 import chisel3.util._
 
-// ============================================================================
-// 1. Dispatcher 模块（指令分派器）
-// ============================================================================
-
 class Dispatcher extends Module with CPUConfig {
   val io = IO(new Bundle {
     // 来自 Decoder 的分派信息
@@ -28,24 +24,24 @@ class Dispatcher extends Module with CPUConfig {
     val zicsr = Decoupled(new ZicsrDispatch)
   })
 
-  // ========== 1. 数据包整合 ==========
+  // 数据包整合
   val dataReq = Wire(new DataReq)
   dataReq.src1Sel := io.decoder.bits.microOp.op1Src
   dataReq.src1Tag := io.rat.bits.phyRs1
-  dataReq.src1Busy := !io.rat.bits.rs1Ready
+  dataReq.src1Ready := io.rat.bits.rs1Ready
   dataReq.src2Sel := io.decoder.bits.microOp.op2Src
   dataReq.src2Tag := io.rat.bits.phyRs2
-  dataReq.src2Busy := !io.rat.bits.rs2Ready
+  dataReq.src2Ready := io.rat.bits.rs2Ready
   dataReq.imm := io.decoder.bits.imm
   dataReq.pc := io.decoder.bits.pc
 
-  // ========== 2. 指令类型判断 ==========
+  // 指令类型判断
   val isALU = io.decoder.bits.microOp.aluOp =/= ALUOp.NOP
   val isBRU = io.decoder.bits.microOp.bruOp =/= BRUOp.NOP
   val isLSU = io.decoder.bits.microOp.lsuOp =/= LSUOp.NOP
   val isZicsr = io.decoder.bits.microOp.zicsrOp =/= ZicsrOp.NOP
 
-  // ========== 3. 握手控制 ==========
+  // 握手控制
   val needFlush = io.globalFlush || io.branchFlush
   val aluReady = io.aluRS.ready || !isALU
   val bruReady = io.bruRS.ready || !isBRU
@@ -57,7 +53,7 @@ class Dispatcher extends Module with CPUConfig {
   io.decoder.ready := allReady
   io.rat.ready := allReady
 
-  // ========== 4. 分派逻辑 ==========
+  // 分派逻辑
   // ALU 指令分派
   io.aluRS.valid := io.decoder.valid && isALU && !needFlush
   io.aluRS.bits.aluOp := io.decoder.bits.microOp.aluOp
@@ -83,25 +79,23 @@ class Dispatcher extends Module with CPUConfig {
   io.lsu.bits.opcode := io.decoder.bits.microOp.lsuOp
   io.lsu.bits.memWidth := io.decoder.bits.microOp.lsuWidth
   io.lsu.bits.memSign := io.decoder.bits.microOp.lsuSign
-  io.lsu.bits.rd := 0.U // rd 在 RAT 中处理
+  io.lsu.bits.data := dataReq
+  io.lsu.bits.phyRd := io.rat.bits.phyRd
   io.lsu.bits.robId := io.decoder.bits.robId
   io.lsu.bits.branchMask := io.rat.bits.branchMask
-  io.lsu.bits.epoch := 0.U // epoch 在其他地方处理
   io.lsu.bits.privMode := io.decoder.bits.privMode
 
   // Zicsr 指令分派
   io.zicsr.valid := io.decoder.valid && isZicsr && !needFlush
   io.zicsr.bits.zicsrOp := io.decoder.bits.microOp.zicsrOp
+  io.zicsr.bits.data := dataReq
   io.zicsr.bits.csrAddr := io.decoder.bits.csrAddr
   io.zicsr.bits.robId := io.decoder.bits.robId
   io.zicsr.bits.phyRd := io.rat.bits.phyRd
   io.zicsr.bits.branchMask := io.rat.bits.branchMask
+  io.zicsr.bits.privMode := io.decoder.bits.privMode
   io.zicsr.bits.exception := io.decoder.bits.exception
 }
-
-// ============================================================================
-// 2. AluRS 模块（ALU 保留站）
-// ============================================================================
 
 class AluRS extends Module with CPUConfig {
   val io = IO(new Bundle {
@@ -115,8 +109,8 @@ class AluRS extends Module with CPUConfig {
     val globalFlush = Input(Bool())
     // 来自 BRU 的分支冲刷信号
     val branchFlush = Input(Bool())
-    // 来自 BRU 的需清除的分支掩码
-    val killMask = Input(SnapshotMask)
+    // 来自 BRU 的计算完成的分支掩码
+    val branchOH = Input(SnapshotMask)
 
     // 向 PRF 发送源寄存器读取请求
     val prfRead = Decoupled(new PrfReadPacket)
@@ -124,7 +118,7 @@ class AluRS extends Module with CPUConfig {
     val aluReq = Decoupled(new AluReq)
   })
 
-  // ========== 0. Entry 结构体定义 ==========
+  // Entry 结构体定义
   class AluRSEntry extends Bundle with CPUConfig {
     val busy = Bool()
     val aluOp = ALUOp()
@@ -135,9 +129,11 @@ class AluRS extends Module with CPUConfig {
     val exception = new Exception
   }
 
-  // ========== 1. Waiting Pool 定义 ==========
+  // Waiting Pool 定义
   val RS_SIZE = 8
-  val rsEntries = RegInit(VecInit(Seq.fill(RS_SIZE)(0.U.asTypeOf(new AluRSEntry))))
+  val rsEntries = RegInit(
+    VecInit(Seq.fill(RS_SIZE)(0.U.asTypeOf(new AluRSEntry)))
+  )
 
   // 统计空闲槽位
   val freeEntries = rsEntries.map(!_.busy)
@@ -145,7 +141,7 @@ class AluRS extends Module with CPUConfig {
   val freeIdx = PriorityEncoder(freeEntries)
   val needFlush = io.globalFlush || io.branchFlush
 
-  // ========== 2. 入队逻辑 ==========
+  // 入队逻辑
   io.req.ready := hasFree && !needFlush
 
   when(io.req.fire) {
@@ -160,27 +156,29 @@ class AluRS extends Module with CPUConfig {
     rsEntries(freeIdx) := newEntry
   }
 
-  // ========== 3. CDB 监听与唤醒 ==========
+  // CDB 监听与唤醒
   // 遍历所有 RS 条目，更新操作数状态
   for (i <- 0 until RS_SIZE) {
     val entry = rsEntries(i)
 
     // 检查 src1
     when(io.cdb.valid && io.cdb.bits.phyRd === entry.data.src1Tag) {
-      entry.data.src1Busy := false.B
+      entry.data.src1Ready := true.B
     }
 
     // 检查 src2
     when(io.cdb.valid && io.cdb.bits.phyRd === entry.data.src2Tag) {
-      entry.data.src2Busy := false.B
+      entry.data.src2Ready := true.B
     }
   }
 
-  // ========== 4. 指令就绪判断 ==========
+  // 指令就绪判断
   // 计算每个条目的就绪状态
   val readyEntries = VecInit(rsEntries.map { entry =>
-    val src1Ready = !entry.data.src1Busy || (entry.data.src1Sel =/= Src1Sel.REG)
-    val src2Ready = !entry.data.src2Busy || (entry.data.src2Sel =/= Src2Sel.REG)
+    val src1Ready =
+      (entry.data.src1Sel =/= Src1Sel.REG) || entry.data.src1Ready
+    val src2Ready =
+      (entry.data.src2Sel =/= Src2Sel.REG) || entry.data.src2Ready
     entry.busy && src1Ready && src2Ready
   })
 
@@ -188,7 +186,7 @@ class AluRS extends Module with CPUConfig {
   val readyIdx = PriorityEncoder(readyEntries)
   val canIssue = hasReady && !needFlush
 
-  // ========== 5. 发射逻辑 ==========
+  // 发射逻辑
   val selectedEntry = rsEntries(readyIdx)
 
   // 向 PRF 发送读取请求
@@ -212,7 +210,7 @@ class AluRS extends Module with CPUConfig {
     rsEntries(readyIdx).busy := false.B
   }
 
-  // ========== 6. 冲刷处理 ==========
+  // 冲刷处理
   // 全局冲刷：清空所有指令
   when(io.globalFlush) {
     for (i <- 0 until RS_SIZE) {
@@ -221,9 +219,10 @@ class AluRS extends Module with CPUConfig {
   }
 
   // 分支冲刷：根据 branchMask 清除依赖该分支的指令
-  when(io.branchFlush) {
-    for (i <- 0 until RS_SIZE) {
-      when((rsEntries(i).branchMask & io.killMask) =/= 0.U) {
+  for (i <- 0 until RS_SIZE) {
+    when(rsEntries(i).busy && (rsEntries(i).branchMask & io.branchOH) =/= 0.U) {
+      rsEntries(i).branchMask := rsEntries(i).branchMask & ~io.branchOH
+      when(io.branchFlush) {
         rsEntries(i).busy := false.B
       }
     }
@@ -231,10 +230,6 @@ class AluRS extends Module with CPUConfig {
 
   io.cdb.ready := true.B
 }
-
-// ============================================================================
-// 3. BruRS 模块（BRU 保留站）
-// ============================================================================
 
 class BruRS extends Module with CPUConfig {
   val io = IO(new Bundle {
@@ -248,8 +243,8 @@ class BruRS extends Module with CPUConfig {
     val globalFlush = Input(Bool())
     // 来自 BRU 的分支冲刷信号
     val branchFlush = Input(Bool())
-    // 来自 BRU 的需清除的分支掩码
-    val killMask = Input(SnapshotMask)
+    // 来自 BRU 的计算完成的分支掩码
+    val branchMask = Input(SnapshotMask)
 
     // 向 PRF 发送源寄存器读取请求
     val prfRead = Decoupled(new PrfReadPacket)
@@ -257,7 +252,7 @@ class BruRS extends Module with CPUConfig {
     val bruReq = Decoupled(new BruReq)
   })
 
-  // ========== 0. Entry 结构体定义 ==========
+  // Entry 结构体定义
   class BruRSEntry extends Bundle with CPUConfig {
     val busy = Bool()
     val bruOp = BRUOp()
@@ -270,9 +265,11 @@ class BruRS extends Module with CPUConfig {
     val exception = new Exception
   }
 
-  // ========== 1. Waiting Pool 定义 ==========
+  // Waiting Pool 定义 
   val RS_SIZE = 4
-  val rsEntries = RegInit(VecInit(Seq.fill(RS_SIZE)(0.U.asTypeOf(new BruRSEntry))))
+  val rsEntries = RegInit(
+    VecInit(Seq.fill(RS_SIZE)(0.U.asTypeOf(new BruRSEntry)))
+  )
 
   // 统计空闲槽位
   val freeEntries = rsEntries.map(!_.busy)
@@ -280,7 +277,7 @@ class BruRS extends Module with CPUConfig {
   val freeIdx = PriorityEncoder(freeEntries)
   val needFlush = io.globalFlush || io.branchFlush
 
-  // ========== 2. 入队逻辑 ==========
+  // 入队逻辑 
   io.enq.ready := hasFree && !needFlush
 
   when(io.enq.fire) {
@@ -297,27 +294,29 @@ class BruRS extends Module with CPUConfig {
     rsEntries(freeIdx) := newEntry
   }
 
-  // ========== 3. CDB 监听与唤醒 ==========
+  // CDB 监听与唤醒
   // 遍历所有 RS 条目，更新操作数状态
   for (i <- 0 until RS_SIZE) {
     val entry = rsEntries(i)
 
     // 检查 src1
     when(io.cdb.valid && io.cdb.bits.phyRd === entry.data.src1Tag) {
-      entry.data.src1Busy := false.B
+      entry.data.src1Ready := false.B
     }
 
     // 检查 src2
     when(io.cdb.valid && io.cdb.bits.phyRd === entry.data.src2Tag) {
-      entry.data.src2Busy := false.B
+      entry.data.src2Ready := false.B
     }
   }
 
-  // ========== 4. 指令就绪判断 ==========
+  // 指令就绪判断
   // 计算每个条目的就绪状态
   val readyEntries = VecInit(rsEntries.map { entry =>
-    val src1Ready = !entry.data.src1Busy || (entry.data.src1Sel =/= Src1Sel.REG)
-    val src2Ready = !entry.data.src2Busy || (entry.data.src2Sel =/= Src2Sel.REG)
+    val src1Ready =
+      !entry.data.src1Ready || (entry.data.src1Sel =/= Src1Sel.REG)
+    val src2Ready =
+      !entry.data.src2Ready || (entry.data.src2Sel =/= Src2Sel.REG)
     entry.busy && src1Ready && src2Ready
   })
 
@@ -325,7 +324,7 @@ class BruRS extends Module with CPUConfig {
   val readyIdx = PriorityEncoder(readyEntries)
   val canIssue = hasReady && !needFlush
 
-  // ========== 5. 发射逻辑 ==========
+  // 发射逻辑
   val selectedEntry = rsEntries(readyIdx)
 
   // 向 PRF 发送读取请求
@@ -350,7 +349,7 @@ class BruRS extends Module with CPUConfig {
     rsEntries(readyIdx).busy := false.B
   }
 
-  // ========== 6. 冲刷处理 ==========
+  // 冲刷处理
   // 全局冲刷：清空所有指令
   when(io.globalFlush) {
     for (i <- 0 until RS_SIZE) {
@@ -359,9 +358,10 @@ class BruRS extends Module with CPUConfig {
   }
 
   // 分支冲刷：根据 branchMask 清除依赖该分支的指令
-  when(io.branchFlush) {
-    for (i <- 0 until RS_SIZE) {
-      when((rsEntries(i).branchMask & io.killMask) =/= 0.U) {
+  for (i <- 0 until RS_SIZE) {
+    when(rsEntries(i).busy && (rsEntries(i).branchMask & io.branchMask) =/= 0.U) {
+      rsEntries(i).branchMask := rsEntries(i).branchMask & ~io.branchMask
+      when(io.branchFlush) {
         rsEntries(i).busy := false.B
       }
     }

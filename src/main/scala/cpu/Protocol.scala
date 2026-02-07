@@ -230,10 +230,10 @@ class DispatchIO extends Bundle with CPUConfig {
 class DataReq extends Bundle with CPUConfig {
   val src1Sel = Src1Sel()
   val src1Tag = PhyTag
-  val src1Busy = Bool()
+  val src1Ready = Bool()
   val src2Sel = Src2Sel()
   val src2Tag = PhyTag
-  val src2Busy = Bool()
+  val src2Ready = Bool()
   val imm = DataW
   val pc = AddrW
 }
@@ -505,10 +505,10 @@ class LSUDispatch extends Bundle with CPUConfig {
   val opcode = LSUOp() // Load / Store
   val memWidth = LSUWidth() // 访问位宽
   val memSign = LSUsign() // 符号扩展标志
-  val rd = ArchTag // 目标寄存器 (Load 指令)
+  val data = new DataReq // 数据包
+  val phyRd = ArchTag // 目标寄存器 (Load 指令)
   val robId = RobTag // ROB 条目 ID
   val branchMask = SnapshotMask // 分支掩码
-  val epoch = EpochW // 纪元标记
   val privMode = PrivMode() // 特权级
 }
 
