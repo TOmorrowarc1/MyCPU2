@@ -258,6 +258,17 @@ class BruRSDispatch extends Bundle with CPUConfig {
   val exception = new Exception
 }
 
+class ZicsrDispatch extends Bundle with CPUConfig {
+  val zicsrOp = ZicsrOp()
+  val data = new DataReq
+  val csrAddr = CsrAddrW
+  val robId = RobTag
+  val phyRd = PhyTag
+  val branchMask = SnapshotMask
+  val privMode = PrivMode()
+  val exception = new Exception
+}
+
 // ============================================================================
 // 4. 后端执行 (Backend: Issue, PRF, EU)
 // ============================================================================

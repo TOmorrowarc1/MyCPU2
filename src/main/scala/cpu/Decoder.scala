@@ -289,6 +289,7 @@ class Decoder extends Module with CPUConfig {
   io.dispatch.bits.pc := pc
   io.dispatch.bits.imm := imm
   io.dispatch.bits.csrAddr := csrAddr
+  io.dispatch.bits.privMode := privMode
   io.dispatch.bits.prediction := prediction
   io.dispatch.bits.exception := finalException
 }
