@@ -61,7 +61,6 @@ class Dispatcher extends Module with CPUConfig {
   io.aluRS.bits.robId := io.decoder.bits.robId
   io.aluRS.bits.phyRd := io.rat.bits.phyRd
   io.aluRS.bits.branchMask := io.rat.bits.branchMask
-  io.aluRS.bits.exception := io.decoder.bits.exception
 
   // BRU 指令分派
   io.bruRS.valid := io.decoder.valid && isBRU && !needFlush
@@ -72,7 +71,6 @@ class Dispatcher extends Module with CPUConfig {
   io.bruRS.bits.snapshotOH := io.rat.bits.snapshotOH
   io.bruRS.bits.branchMask := io.rat.bits.branchMask
   io.bruRS.bits.prediction := io.decoder.bits.prediction
-  io.bruRS.bits.exception := io.decoder.bits.exception
 
   // LSU 指令分派
   io.lsu.valid := io.decoder.valid && isLSU && !needFlush
@@ -94,7 +92,6 @@ class Dispatcher extends Module with CPUConfig {
   io.zicsr.bits.phyRd := io.rat.bits.phyRd
   io.zicsr.bits.branchMask := io.rat.bits.branchMask
   io.zicsr.bits.privMode := io.decoder.bits.privMode
-  io.zicsr.bits.exception := io.decoder.bits.exception
 }
 
 class AluRS extends Module with CPUConfig {
@@ -126,7 +123,6 @@ class AluRS extends Module with CPUConfig {
     val robId = RobTag
     val phyRd = PhyTag
     val branchMask = SnapshotMask
-    val exception = new Exception
   }
 
   // Waiting Pool 定义
@@ -152,7 +148,6 @@ class AluRS extends Module with CPUConfig {
     newEntry.robId := io.req.bits.robId
     newEntry.phyRd := io.req.bits.phyRd
     newEntry.branchMask := io.req.bits.branchMask
-    newEntry.exception := io.req.bits.exception
     rsEntries(freeIdx) := newEntry
   }
 
@@ -199,7 +194,6 @@ class AluRS extends Module with CPUConfig {
   io.aluReq.bits.aluOp := selectedEntry.aluOp
   io.aluReq.bits.meta.robId := selectedEntry.robId
   io.aluReq.bits.meta.phyRd := selectedEntry.phyRd
-  io.aluReq.bits.meta.exception := selectedEntry.exception
   io.aluReq.bits.data.src1Sel := selectedEntry.data.src1Sel
   io.aluReq.bits.data.src2Sel := selectedEntry.data.src2Sel
   io.aluReq.bits.data.imm := selectedEntry.data.imm
@@ -262,7 +256,6 @@ class BruRS extends Module with CPUConfig {
     val snapshotOH = SnapshotMask
     val branchMask = SnapshotMask
     val prediction = new Prediction
-    val exception = new Exception
   }
 
   // Waiting Pool 定义
@@ -290,7 +283,6 @@ class BruRS extends Module with CPUConfig {
     newEntry.snapshotOH := io.enq.bits.snapshotOH
     newEntry.branchMask := io.enq.bits.branchMask
     newEntry.prediction := io.enq.bits.prediction
-    newEntry.exception := io.enq.bits.exception
     rsEntries(freeIdx) := newEntry
   }
 
@@ -338,7 +330,6 @@ class BruRS extends Module with CPUConfig {
   io.bruReq.bits.prediction := selectedEntry.prediction
   io.bruReq.bits.meta.robId := selectedEntry.robId
   io.bruReq.bits.meta.phyRd := selectedEntry.phyRd
-  io.bruReq.bits.meta.exception := selectedEntry.exception
   io.bruReq.bits.data.src1Sel := selectedEntry.data.src1Sel
   io.bruReq.bits.data.src2Sel := selectedEntry.data.src2Sel
   io.bruReq.bits.data.imm := selectedEntry.data.imm

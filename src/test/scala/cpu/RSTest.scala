@@ -55,7 +55,6 @@ class RSTest extends AnyFlatSpec with ChiselScalatestTester {
     dut.io.decoder.bits.privMode.poke(privMode)
     dut.io.decoder.bits.prediction.taken.poke(false.B)
     dut.io.decoder.bits.prediction.targetPC.poke((pc + 4).U)
-    dut.io.decoder.bits.exception.valid.poke(false.B)
   }
 
   // 辅助函数：设置 RAT 输入
@@ -298,7 +297,6 @@ class RSTest extends AnyFlatSpec with ChiselScalatestTester {
     dut.io.req.bits.data.imm.poke(imm.U)
     dut.io.req.bits.data.pc.poke(pc.U)
     dut.io.req.bits.branchMask.poke(branchMask.U)
-    dut.io.req.bits.exception.valid.poke(false.B)
   }
 
   "AluRS" should "成功入队一条指令" in {
@@ -642,7 +640,6 @@ class RSTest extends AnyFlatSpec with ChiselScalatestTester {
     dut.io.enq.bits.branchMask.poke(branchMask.U)
     dut.io.enq.bits.prediction.taken.poke(predictionTaken.B)
     dut.io.enq.bits.prediction.targetPC.poke(predictionTarget.U)
-    dut.io.enq.bits.exception.valid.poke(false.B)
   }
 
   "BruRS" should "成功入队一条指令" in {
@@ -995,29 +992,6 @@ class RSTest extends AnyFlatSpec with ChiselScalatestTester {
       // 验证所有指令被清空
       dut.io.aluReq.valid.expect(false.B)
       dut.io.prfRead.valid.expect(false.B)
-    }
-  }
-
-  it should "正确处理异常指令" in {
-    test(new AluRS) { dut =>
-      setAluRSDefaults(dut)
-
-      // 入队一条带异常的指令
-      setAluRSRequest(dut, robId = 0, phyRd = 10)
-      dut.io.req.bits.exception.valid.poke(true.B)
-      dut.io.req.bits.exception.cause.poke(
-        ExceptionCause.ILLEGAL_INSTRUCTION
-      )
-      dut.io.req.bits.exception.tval.poke(0x80000000L.U)
-      dut.io.req.ready.expect(true.B)
-      dut.clock.step()
-
-      // 验证指令可以发射
-      dut.io.aluReq.valid.expect(true.B)
-      dut.io.aluReq.bits.meta.exception.valid.expect(true.B)
-      dut.io.aluReq.bits.meta.exception.cause.expect(
-        ExceptionCause.ILLEGAL_INSTRUCTION
-      )
     }
   }
 

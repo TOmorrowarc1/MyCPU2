@@ -183,7 +183,6 @@ class DispatchPacket extends Bundle with CPUConfig {
   val csrAddr = CsrAddrW
   val privMode = PrivMode()
   val prediction = new Prediction
-  val exception = new Exception
 }
 
 // Decoder -> RAT (请求重命名)
@@ -244,7 +243,6 @@ class AluRSDispatch extends Bundle with CPUConfig {
   val robId = RobTag
   val phyRd = PhyTag
   val branchMask = SnapshotMask
-  val exception = new Exception
 }
 
 class BruRSDispatch extends Bundle with CPUConfig {
@@ -255,7 +253,6 @@ class BruRSDispatch extends Bundle with CPUConfig {
   val snapshotOH = SnapshotMask
   val branchMask = SnapshotMask
   val prediction = new Prediction
-  val exception = new Exception
 }
 
 class ZicsrDispatch extends Bundle with CPUConfig {
@@ -266,7 +263,6 @@ class ZicsrDispatch extends Bundle with CPUConfig {
   val phyRd = PhyTag
   val branchMask = SnapshotMask
   val privMode = PrivMode()
-  val exception = new Exception
 }
 
 // ============================================================================
@@ -291,7 +287,6 @@ class PrfReadData extends Bundle with CPUConfig {
 class IssueMetaPacket extends Bundle with CPUConfig {
   val robId = RobTag
   val phyRd = PhyTag
-  val exception = new Exception
 }
 
 class IssueDataPacket extends Bundle with CPUConfig {

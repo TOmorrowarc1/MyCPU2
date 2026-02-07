@@ -237,7 +237,6 @@ class AluRSDispatch extends Bundle with CPUConfig {
   val robId       = RobTag
   val phyRd       = PhyTag
   val branchMask  = SnapshotMask
-  val exception   = new Exception
 }
 
 // Dispatch -> BRU RS
@@ -249,7 +248,6 @@ class BruRSDispatch extends Bundle with CPUConfig {
   val snapshotOH  = SnapshotMask
   val branchMask  = SnapshotMask
   val prediction  = new Prediction
-  val exception   = new Exception
 }
 ```
 
@@ -274,7 +272,6 @@ class PrfReadData extends Bundle with CPUConfig {
 class IssueMetaPacket extends Bundle with CPUConfig {
   val robId    = RobTag
   val phyRd    = PhyTag
-  val exception = new Exception
 }
 
 class IssueDataPacket extends Bundle with CPUConfig {
