@@ -210,18 +210,20 @@ class AluRS extends Module with CPUConfig {
     for (i <- 0 until RS_SIZE) {
       rsEntries(i).busy := false.B
     }
-  }
-
-  // 分支冲刷：根据 branchMask 清除依赖该分支的指令
-  for (i <- 0 until RS_SIZE) {
-    when(rsEntries(i).busy && (rsEntries(i).branchMask & io.branchOH) =/= 0.U) {
-      rsEntries(i).branchMask := rsEntries(i).branchMask & ~io.branchOH
-      when(io.branchFlush) {
-        rsEntries(i).busy := false.B
+  }.otherwise {
+    // 分支冲刷：根据 branchMask 清除依赖该分支的指令
+    for (i <- 0 until RS_SIZE) {
+      when(
+        rsEntries(i).busy && (rsEntries(i).branchMask & io.branchOH) =/= 0.U
+      ) {
+        rsEntries(i).branchMask := rsEntries(i).branchMask & ~io.branchOH
+        when(io.branchFlush) {
+          rsEntries(i).busy := false.B
+        }
       }
     }
   }
-
+  
   io.cdb.ready := true.B
 }
 
@@ -346,14 +348,16 @@ class BruRS extends Module with CPUConfig {
     for (i <- 0 until RS_SIZE) {
       rsEntries(i).busy := false.B
     }
-  }
-
-  // 分支冲刷：根据 branchMask 清除依赖该分支的指令
-  for (i <- 0 until RS_SIZE) {
-    when(rsEntries(i).busy && (rsEntries(i).branchMask & io.branchOH) =/= 0.U) {
-      rsEntries(i).branchMask := rsEntries(i).branchMask & ~io.branchOH
-      when(io.branchFlush) {
-        rsEntries(i).busy := false.B
+  }.otherwise {
+    // 分支冲刷：根据 branchMask 清除依赖该分支的指令
+    for (i <- 0 until RS_SIZE) {
+      when(
+        rsEntries(i).busy && (rsEntries(i).branchMask & io.branchOH) =/= 0.U
+      ) {
+        rsEntries(i).branchMask := rsEntries(i).branchMask & ~io.branchOH
+        when(io.branchFlush) {
+          rsEntries(i).busy := false.B
+        }
       }
     }
   }
