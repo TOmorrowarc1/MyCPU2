@@ -18,25 +18,27 @@ ALU 是 Tomasulo 架构中的四个执行单元之一，与分支解决单元（
 
 ### 2.1 输入接口
 
-ALU 从 CPU 中的多个源接收输入：
+ALU 从 CPU 中的多个源接收输入，使用 [`AluDrivenPacket`](../../src/main/scala/cpu/Protocol.scala:321-324) 结构体：
 
 #### 2.1.1 来自保留站（RS）
 
 | 信号 | 类型 | 描述 |
 |------|------|------|
-| `ALUOp` | `ALUOp` | 指定要执行的 ALU 操作的操作码 |
-| `Op1Sel` | `Src1Sel` | 第一个操作数源的选择器 |
-| `Op2Sel` | `Src2Sel` | 第二个操作数源的选择器 |
-| `Imm` | `UInt(32.W)` | I 类型和 U 类型指令的立即数 |
-| `PC` | `UInt(32.W)` | 用于 PC 相对操作的程序计数器值 |
-| `RobID` | `UInt(5.W)` | 用于结果跟踪的重排序缓冲区条目标识符 |
+| `aluOp` | `ALUOp` | 指定要执行的 ALU 操作的操作码（来自 [`AluReq`](../../src/main/scala/cpu/Protocol.scala:305-309)） |
+| `src1Sel` | `Src1Sel` | 第一个操作数源的选择器（来自 [`IssueDataPacket`](../../src/main/scala/cpu/Protocol.scala:297-302)） |
+| `src2Sel` | `Src2Sel` | 第二个操作数源的选择器（来自 [`IssueDataPacket`](../../src/main/scala/cpu/Protocol.scala:297-302)） |
+| `imm` | `DataW` | I 类型和 U 类型指令的立即数（来自 [`IssueDataPacket`](../../src/main/scala/cpu/Protocol.scala:297-302)） |
+| `pc` | `AddrW` | 用于 PC 相对操作的程序计数器值（来自 [`IssueDataPacket`](../../src/main/scala/cpu/Protocol.scala:297-302)） |
+| `robId` | `RobTag` | 用于结果跟踪的重排序缓冲区条目标识符（来自 [`IssueMetaPacket`](../../src/main/scala/cpu/Protocol.scala:291-295)） |
+| `phyRd` | `PhyTag` | 目标物理寄存器标识符（来自 [`IssueMetaPacket`](../../src/main/scala/cpu/Protocol.scala:291-295)） |
+| `exception` | `Exception` | 异常信息（来自 [`IssueMetaPacket`](../../src/main/scala/cpu/Protocol.scala:291-295)） |
 
 #### 2.1.2 来自物理寄存器文件（PRF）
 
 | 信号 | 类型 | 描述 |
 |------|------|------|
-| `ReadData1` | `UInt(32.W)` | 从物理寄存器文件读取的第一个操作数 |
-| `ReadData2` | `UInt(32.W)` | 从物理寄存器文件读取的第二个操作数 |
+| `rdata1` | `DataW` | 从物理寄存器文件读取的第一个操作数（来自 [`PrfReadData`](../../src/main/scala/cpu/Protocol.scala:285-288)） |
+| `rdata2` | `DataW` | 从物理寄存器文件读取的第二个操作数（来自 [`PrfReadData`](../../src/main/scala/cpu/Protocol.scala:285-288)） |
 
 #### 2.1.3 控制信号
 
@@ -47,34 +49,62 @@ ALU 从 CPU 中的多个源接收输入：
 
 ### 2.2 输出接口
 
-ALU 将结果输出到公共数据总线（CDB）：
+ALU 将结果输出到公共数据总线（CDB），使用 [`CDBMessage`](../../src/main/scala/cpu/Protocol.scala:340-346) 结构体：
 
 | 信号 | 类型 | 描述 |
 |------|------|------|
-| `RobID` | `UInt(5.W)` | 重排序缓冲区条目标识符 |
-| `Result` | `UInt(32.W)` | 计算结果 |
-| `Exception` | `Exception` | 异常信息（如果有） |
+| `robId` | `RobTag` | 重排序缓冲区条目标识符 |
+| `phyRd` | `PhyTag` | 目标物理寄存器标识符 |
+| `data` | `DataW` | 计算结果 |
+| `hasSideEffect` | `Bits(1.W)` | 副作用标志（ALU 固定为 0） |
+| `exception` | `Exception` | 异常信息（如果有） |
 
 ### 2.3 Chisel 接口定义
 
+ALU 模块的接口定义在 [`Protocol.scala`](../../src/main/scala/cpu/Protocol.scala) 中，使用以下结构体：
+
 ```scala
-// RS -> ALU 请求
+// RS -> ALU 请求（在 Protocol.scala 第 305-309 行）
 class AluReq extends Bundle with CPUConfig {
   val aluOp = ALUOp()
   val meta = new IssueMetaPacket
   val data = new IssueDataPacket
 }
 
-// 完整 ALU 数据包（控制 + 操作数）
-class AluPacket extends Bundle with CPUConfig {
+// Issue 元数据包（在 Protocol.scala 第 291-295 行）
+class IssueMetaPacket extends Bundle with CPUConfig {
+  val robId = RobTag
+  val phyRd = PhyTag
+  val exception = new Exception
+}
+
+// Issue 数据包（在 Protocol.scala 第 297-302 行）
+class IssueDataPacket extends Bundle with CPUConfig {
+  val src1Sel = Src1Sel()
+  val src2Sel = Src2Sel()
+  val imm = DataW
+  val pc = AddrW
+}
+
+// PRF -> ALU 数据（在 Protocol.scala 第 285-288 行）
+class PrfReadData extends Bundle with CPUConfig {
+  val rdata1 = DataW
+  val rdata2 = DataW
+}
+
+// ALU 驱动数据包（在 Protocol.scala 第 321-324 行）
+class AluDrivenPacket extends Bundle with CPUConfig {
   val aluReq = new AluReq
   val prfData = new PrfReadData
 }
 
-// PRF -> ALU 数据
-class PrfReadData extends Bundle with CPUConfig {
-  val rdata1 = DataW
-  val rdata2 = DataW
+// CDB 消息（在 Protocol.scala 第 340-346 行）
+class CDBMessage extends Bundle with CPUConfig {
+  val robId = RobTag
+  val phyRd = PhyTag
+  val data = DataW
+  val hasSideEffect = Bits(1.W)
+  val exception = new Exception
 }
 ```
 
@@ -106,16 +136,16 @@ ALU 通过多路复用器支持多个操作数源：
 
 | 选择器 | 源 | 描述 |
 |--------|-----|------|
-| `REG` | `ReadData1` | 来自 PRF 寄存器 rs1 的第一个操作数 |
-| `PC` | `PC` | 程序计数器值 |
+| `REG` | `rdata1` | 来自 PRF 寄存器 rs1 的第一个操作数 |
+| `PC` | `pc` | 程序计数器值 |
 | `ZERO` | 0 | 零常数 |
 
 #### 3.2.2 第二个操作数选择（`Src2Sel`）
 
 | 选择器 | 源 | 描述 |
 |--------|-----|------|
-| `REG` | `ReadData2` | 来自 PRF 寄存器 rs2 的第二个操作数 |
-| `IMM` | `Imm` | 来自指令的立即数 |
+| `REG` | `rdata2` | 来自 PRF 寄存器 rs2 的第二个操作数 |
+| `IMM` | `imm` | 来自指令的立即数 |
 | `FOUR` | 4 | 常数值 4（用于 PC+4 操作） |
 
 ### 3.3 指令映射
@@ -150,33 +180,35 @@ ALU 通过多路复用器支持多个操作数源：
 
 ### 4.1 数据流
 
-ALU 按以下数据流运行：
+ALU 按以下数据流运行，使用 [`AluDrivenPacket`](../../src/main/scala/cpu/Protocol.scala:321-324) 和 [`CDBMessage`](../../src/main/scala/cpu/Protocol.scala:340-346) 结构体：
 
 ```
 ┌─────────────┐     ┌─────────────┐     ┌─────────────┐
 │     RS      │────▶│     ALU     │────▶│     CDB     │
 │  (Dispatch) │     │  (Execute)  │     │  (Broadcast)│
+│AluDrivenPkt│     │             │     │ CDBMessage  │
 └─────────────┘     └──────┬──────┘     └─────────────┘
                             │
                      ┌──────┴──────┐
                      │     PRF     │
                      │  (Operands) │
+                     │ PrfReadData │
                      └─────────────┘
 ```
 
 ### 4.2 操作数选择逻辑
 
-ALU 使用多路复用器根据 `Op1Sel` 和 `Op2Sel` 控制信号选择操作数：
+ALU 使用多路复用器根据 [`IssueDataPacket`](../../src/main/scala/cpu/Protocol.scala:297-302) 中的 `src1Sel` 和 `src2Sel` 控制信号选择操作数：
 
 ```scala
-// 操作数 1 选择
+// 操作数 1 选择（来自 PrfReadData.rdata1 和 IssueDataPacket）
 val op1 = MuxLookup(io.aluReq.data.src1Sel, 0.U, Seq(
   Src1Sel.REG  -> io.prfData.rdata1,
   Src1Sel.PC   -> io.aluReq.data.pc,
   Src1Sel.ZERO -> 0.U
 ))
 
-// 操作数 2 选择
+// 操作数 2 选择（来自 PrfReadData.rdata2 和 IssueDataPacket）
 val op2 = MuxLookup(io.aluReq.data.src2Sel, 0.U, Seq(
   Src2Sel.REG  -> io.prfData.rdata2,
   Src2Sel.IMM  -> io.aluReq.data.imm,
@@ -186,7 +218,7 @@ val op2 = MuxLookup(io.aluReq.data.src2Sel, 0.U, Seq(
 
 ### 4.3 操作执行
 
-ALU 根据 `ALUOp` 控制信号执行操作：
+ALU 根据 [`AluReq`](../../src/main/scala/cpu/Protocol.scala:305-309) 中的 `aluOp` 控制信号执行操作：
 
 ```scala
 val result = MuxLookup(io.aluReq.aluOp, 0.U, Seq(
@@ -206,13 +238,13 @@ val result = MuxLookup(io.aluReq.aluOp, 0.U, Seq(
 
 ### 4.4 异常处理
 
-ALU 处理在指令解码期间检测到的异常：
+ALU 处理在指令解码期间检测到的异常，使用 [`IssueMetaPacket`](../../src/main/scala/cpu/Protocol.scala:291-295) 中的 `exception` 字段：
 
 - **异常传播**：如果指令携带来自前端的异常（例如非法指令），ALU 不执行计算，而是直接将异常信息传播到结果包中
 - **异常包**：异常信息包括有效标志、异常原因和陷阱值（tval）
 
 ```scala
-// 异常处理逻辑
+// 异常处理逻辑（来自 IssueMetaPacket.exception）
 val finalResult = Mux(io.aluReq.meta.exception.valid, 0.U, result)
 val finalException = io.aluReq.meta.exception
 ```
@@ -221,7 +253,7 @@ val finalException = io.aluReq.meta.exception
 
 ALU 在向 CDB 广播之前将结果存储在结果寄存器中：
 
-1. **结果寄存**：将计算结果、RobID 和异常信息存储在内部寄存器中
+1. **结果寄存**：将计算结果、robId、phyRd、hasSideEffect 和异常信息存储在内部寄存器中
 2. **CDB 仲裁**：等待 CDB 可用（在仲裁中优先级最低）
 3. **结果广播**：当总线准备好时，将结果包发送到 CDB
 
@@ -229,12 +261,16 @@ ALU 在向 CDB 广播之前将结果存储在结果寄存器中：
 // 结果寄存器
 val resultReg = Reg(UInt(32.W))
 val robIdReg = Reg(UInt(5.W))
+val phyRdReg = Reg(UInt(7.W))
+val hasSideEffectReg = Reg(Bits(1.W))
 val exceptionReg = Reg(new Exception)
 
-// CDB 输出
+// CDB 输出（使用 CDBMessage 结构体）
 io.CDB.valid := busy
 io.CDB.bits.robId := robIdReg
+io.CDB.bits.phyRd := phyRdReg
 io.CDB.bits.data := resultReg
+io.CDB.bits.hasSideEffect := hasSideEffectReg
 io.CDB.bits.exception := exceptionReg
 ```
 
@@ -266,7 +302,7 @@ ALU 作为单周期执行单元运行：
 
 ALU 中的关键路径包括：
 
-1. 操作数多路复用（Op1Sel、Op2Sel）
+1. 操作数多路复用（src1Sel、src2Sel）
 2. ALU 操作执行（加法器、移位器、比较器）
 3. 结果寄存
 
@@ -276,7 +312,7 @@ ALU 中的关键路径包括：
 
 ### 6.1 保留站（RS）
 
-ALU 从 ALU 保留站（ALURS）接收指令：
+ALU 从 ALU 保留站（ALURS）接收指令，使用 [`AluDrivenPacket`](../../src/main/scala/cpu/Protocol.scala:321-324) 结构体：
 
 - **分派**：当所有操作数都可用时，RS 将就绪指令分派到 ALU
 - **发射**：发射阶段从 PRF 读取操作数，并将完整数据包发送到 ALU
@@ -284,7 +320,7 @@ ALU 从 ALU 保留站（ALURS）接收指令：
 
 ### 6.2 物理寄存器文件（PRF）
 
-ALU 从 PRF 读取操作数：
+ALU 从 PRF 读取操作数，使用 [`PrfReadData`](../../src/main/scala/cpu/Protocol.scala:285-288) 结构体：
 
 - **读端口**：两个读端口提供操作数值（`rdata1`、`rdata2`）
 - **读时序**：操作数在发射周期读取并传递给 ALU
@@ -292,10 +328,10 @@ ALU 从 PRF 读取操作数：
 
 ### 6.3 公共数据总线（CDB）
 
-ALU 通过 CDB 广播结果：
+ALU 通过 CDB 广播结果，使用 [`CDBMessage`](../../src/main/scala/cpu/Protocol.scala:340-346) 结构体：
 
 - **仲裁优先级**：最低优先级（ZICSRU > LSU > BRU > ALU）
-- **广播格式**：`{RobID, Result, Exception}`
+- **广播格式**：`{robId, phyRd, data, hasSideEffect, exception}`
 - **转发**：RS 和 PRF 监听 CDB 以便将结果转发给依赖指令
 
 ### 6.4 重排序缓冲区（ROB）
@@ -369,7 +405,7 @@ ALU 使用来自 `CPUConfig` 的以下配置参数：
 ALU 的关键验证点：
 
 1. **操作正确性**：验证每个 ALU 操作产生正确结果
-2. **操作数选择**：验证所有 `Src1Sel` 和 `Src2Sel` 组合的正确操作数选择
+2. **操作数选择**：验证所有 `src1Sel` 和 `src2Sel` 组合的正确操作数选择
 3. **异常处理**：验证异常被正确传播
 4. **边界情况**：测试边界条件（溢出、移位量、比较）
 

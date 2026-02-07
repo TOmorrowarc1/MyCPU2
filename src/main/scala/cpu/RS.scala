@@ -244,7 +244,7 @@ class BruRS extends Module with CPUConfig {
     // 来自 BRU 的分支冲刷信号
     val branchFlush = Input(Bool())
     // 来自 BRU 的计算完成的分支掩码
-    val branchMask = Input(SnapshotMask)
+    val branchOH = Input(SnapshotMask)
 
     // 向 PRF 发送源寄存器读取请求
     val prfRead = Decoupled(new PrfReadPacket)
@@ -265,7 +265,7 @@ class BruRS extends Module with CPUConfig {
     val exception = new Exception
   }
 
-  // Waiting Pool 定义 
+  // Waiting Pool 定义
   val RS_SIZE = 4
   val rsEntries = RegInit(
     VecInit(Seq.fill(RS_SIZE)(0.U.asTypeOf(new BruRSEntry)))
@@ -277,7 +277,7 @@ class BruRS extends Module with CPUConfig {
   val freeIdx = PriorityEncoder(freeEntries)
   val needFlush = io.globalFlush || io.branchFlush
 
-  // 入队逻辑 
+  // 入队逻辑
   io.enq.ready := hasFree && !needFlush
 
   when(io.enq.fire) {
@@ -301,12 +301,12 @@ class BruRS extends Module with CPUConfig {
 
     // 检查 src1
     when(io.cdb.valid && io.cdb.bits.phyRd === entry.data.src1Tag) {
-      entry.data.src1Ready := false.B
+      entry.data.src1Ready := true.B
     }
 
     // 检查 src2
     when(io.cdb.valid && io.cdb.bits.phyRd === entry.data.src2Tag) {
-      entry.data.src2Ready := false.B
+      entry.data.src2Ready := true.B
     }
   }
 
@@ -314,9 +314,9 @@ class BruRS extends Module with CPUConfig {
   // 计算每个条目的就绪状态
   val readyEntries = VecInit(rsEntries.map { entry =>
     val src1Ready =
-      !entry.data.src1Ready || (entry.data.src1Sel =/= Src1Sel.REG)
+      (entry.data.src1Sel =/= Src1Sel.REG) || entry.data.src1Ready
     val src2Ready =
-      !entry.data.src2Ready || (entry.data.src2Sel =/= Src2Sel.REG)
+      (entry.data.src2Sel =/= Src2Sel.REG) || entry.data.src2Ready
     entry.busy && src1Ready && src2Ready
   })
 
@@ -359,8 +359,8 @@ class BruRS extends Module with CPUConfig {
 
   // 分支冲刷：根据 branchMask 清除依赖该分支的指令
   for (i <- 0 until RS_SIZE) {
-    when(rsEntries(i).busy && (rsEntries(i).branchMask & io.branchMask) =/= 0.U) {
-      rsEntries(i).branchMask := rsEntries(i).branchMask & ~io.branchMask
+    when(rsEntries(i).busy && (rsEntries(i).branchMask & io.branchOH) =/= 0.U) {
+      rsEntries(i).branchMask := rsEntries(i).branchMask & ~io.branchOH
       when(io.branchFlush) {
         rsEntries(i).busy := false.B
       }
