@@ -256,7 +256,7 @@ class Decoder extends Module with CPUConfig {
   // 向 Fetcher 发送 Stall 信号
   io.ifStall := (needStall || csrDecoding) && !needFlush
   // 向 Icache 发送 ready 信号
-  io.in.ready := !(needStall || needFlush)
+  io.in.ready := !needStall && !needFlush
   // 生成该阶段 valid 信号
   decoderValid := io.in.valid && !needStall && !needFlush
 
