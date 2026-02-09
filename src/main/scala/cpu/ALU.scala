@@ -5,8 +5,8 @@ import chisel3.util._
 
 class ALU extends Module with CPUConfig {
   val io = IO(new Bundle {
-    val in = Input(Decoupled(new AluDrivenPacket))
-    val out = Output(Decoupled(new CDBMessage))
+    val in = Flipped(Decoupled(new AluDrivenPacket))
+    val out = Decoupled(new CDBMessage)
     val globalFlush = Input(Bool())
     val branchFlush = Input(Bool())
     val branchOH = Input(SnapshotMask)
@@ -92,9 +92,15 @@ class ALU extends Module with CPUConfig {
 
   // CDB 广播逻辑
   io.out.valid := busy && !needFlush
+  io.out.bits.data := resultReg.data
+  io.out.bits.robId := resultReg.robId
+  io.out.bits.phyRd := resultReg.phyRd
+  io.out.bits.hasSideEffect := resultReg.hasSideEffect
+  io.out.bits.exception := resultReg.exception
 
   // 冲刷处理
   when(io.globalFlush) {
+    busy := false.B
     branchMaskReg := 0.U
   }.elsewhen((io.branchOH & branchMaskReg) =/= 0.U) {
     when(io.branchFlush) {
