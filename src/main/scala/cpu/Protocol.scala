@@ -307,6 +307,7 @@ class AluReq extends Bundle with CPUConfig {
 // RS -> BRU
 class BruReq extends Bundle with CPUConfig {
   val bruOp = BRUOp()
+  val snapshotOH = SnapshotMask
   val prediction = new Prediction
   val meta = new IssueMetaPacket
   val data = new IssueDataPacket

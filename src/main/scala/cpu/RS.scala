@@ -330,6 +330,7 @@ class BruRS extends Module with CPUConfig {
   io.bruReq.valid := canIssue
   io.bruReq.bits.bruOp := selectedEntry.bruOp
   io.bruReq.bits.prediction := selectedEntry.prediction
+  io.bruReq.bits.snapshotOH := selectedEntry.snapshotOH
   io.bruReq.bits.meta.robId := selectedEntry.robId
   io.bruReq.bits.meta.phyRd := selectedEntry.phyRd
   io.bruReq.bits.data.src1Sel := selectedEntry.data.src1Sel
