@@ -8,8 +8,8 @@ class BRU extends Module with CPUConfig {
     val in = Input(Decoupled(new BruDrivenPacket))
     val out = Output(Decoupled(new CDBMessage))
     val globalFlush = Input(Bool())
-    val branchFlush = Input(Bool())
-    val branchOH = Input(SnapshotMask)
+    val branchFlush = Output(Bool())
+    val branchOH = Output(SnapshotMask)
     val branchPC = Output(UInt(32.W))
   })
 
@@ -119,15 +119,13 @@ class BRU extends Module with CPUConfig {
     resultReg.hasSideEffect := 0.U
     resultReg.exception := defaultException
   }.otherwise {
+    // 一周期后清除决议信息
+    io.branchFlush := false.B
+    io.branchOH := 0.U
+    io.branchPC := 0.U
     // CDB 完成广播后清除忙碌状态
     when(io.out.fire) {
       busy := false.B
-    }
-    // 一周期后清除决议信息
-    when(branchOHReg =/= 0.U) {
-      io.branchFlush := false.B
-      io.branchOH := 0.U
-      io.branchPC := 0.U
     }
   }
 
