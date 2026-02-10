@@ -5,8 +5,8 @@ import chisel3.util._
 
 class BRU extends Module with CPUConfig {
   val io = IO(new Bundle {
-    val in = Input(Decoupled(new BruDrivenPacket))
-    val out = Output(Decoupled(new CDBMessage))
+    val in = Flipped(Decoupled(new BruDrivenPacket))
+    val out = Decoupled(new CDBMessage)
     val globalFlush = Input(Bool())
     val branchFlush = Output(Bool())
     val branchOH = Output(SnapshotMask)
@@ -60,7 +60,7 @@ class BRU extends Module with CPUConfig {
   )
 
   // 目标计算模块：根据指令类型计算实际的跳转目标地址
-  val actualTarget = MuxCase(
+  val takenTarget = MuxCase(
     0.U(32.W),
     Seq(
       (bruOp === BRUOp.JALR) -> ((src1 + imm) & ~1.U(32.W)),
@@ -75,6 +75,7 @@ class BRU extends Module with CPUConfig {
       (bruOp === BRUOp.NOP) -> (pc + 4.U)
     )
   )
+  val actualTarget = Mux(condition, takenTarget, pc + 4.U)
 
   // 预测比较模块：将计算结果与预测进行比较
   val predictionCorrect = (condition === prediction.taken) &&
@@ -120,9 +121,9 @@ class BRU extends Module with CPUConfig {
     resultReg.exception := defaultException
   }.otherwise {
     // 一周期后清除决议信息
-    io.branchFlush := false.B
-    io.branchOH := 0.U
-    io.branchPC := 0.U
+    branchFlushReg := false.B
+    branchOHReg := 0.U
+    branchPCReg := 0.U
     // CDB 完成广播后清除忙碌状态
     when(io.out.fire) {
       busy := false.B
