@@ -85,8 +85,15 @@ class ZicsrU extends Module with CPUConfig {
   // 操作数就绪检测
   val src1Ready = io.zicsrReq.valid && io.zicsrReq.bits.data.src1Ready
 
+  // 判定目标寄存器是否为 x0（用于 RW 操作的副作用规避）
+  val rdIsX0 = instructionReg.phyRd === 0.U
+
+  // 判定源操作数是否为 x0（用于 RS/RC 操作的副作用规避）
+  val src1IsX0 = instructionReg.data.src1Sel === Src1Sel.ZERO && instructionReg.data.imm === 0.U
+
   // 集体使能
-  io.csrReadReq.valid := calculate
+  // 根据 x0 判定控制 CSR 读请求（RW 操作：rd == x0 时不读）
+  io.csrReadReq.valid := calculate && !rdIsX0
   io.prfReq.valid := calculate
   io.prfData.ready := calculate
 
@@ -120,26 +127,26 @@ class ZicsrU extends Module with CPUConfig {
   )
 
   when(calculate) {
-    // 旧值存储
-    csrRdataReg := io.csrReadResp.data
-    exceptionReg := io.csrReadResp.exception
-    val exceptionValid = io.csrReadResp.exception.valid
+    // 根据 x0 判定控制读取返回值
+    val csrReadResp = Mux(rdIsX0, 0.U.asTypeOf(new CsrReadResp), io.csrReadResp)
+    csrRdataReg := csrReadResp.data
+    exceptionReg := csrReadResp.exception
+    val exceptionValid = csrReadResp.exception.valid
     csrWdataReg := Mux(exceptionValid, 0.U, newValue)
     instructionReg.csrAddr := Mux(exceptionValid, 0.U, instructionReg.csrAddr)
   }
 
   // CSR 写入请求
-  io.csrWriteReq.valid := writeBack
+  // 根据 x0 判定控制 CSR 写请求（RS/RC 操作：rs1 == x0 或立即数为 0 时不写）
+  io.csrWriteReq.valid := writeBack && !src1IsX0
   io.csrWriteReq.bits.csrAddr := instructionReg.csrAddr
   io.csrWriteReq.bits.privMode := instructionReg.privMode
   io.csrWriteReq.bits.data := csrWdataReg
 
   when(writeBack) {
-    exceptionReg := Mux(
-      exceptionReg.valid,
-      exceptionReg,
-      io.csrWriteResp.exception
-    )
+    // 根据 x0 判定控制写响应
+    val csrWriteResp = Mux(src1IsX0, 0.U.asTypeOf(new CsrWriteResp), io.csrWriteResp)
+    exceptionReg := Mux(exceptionReg.valid, exceptionReg, csrWriteResp.exception)
   }
 
   // 结果寄存和广播

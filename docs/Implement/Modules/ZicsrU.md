@@ -164,6 +164,20 @@ ZicsrU 支持 `ZicsrOp` 枚举中定义的以下操作：
 | `RC`  | 读并清除 CSR | CSRRC, CSRRCI       | `NewValue = OldValue & ~RS1/Imm` |
 | `NOP` | 无操作       | 非 CSR 指令的默认值 | 无                               |
 
+#### 3.1.1 副作用规避
+
+为了避免 CSR 读写操作带来的不必要的副作用，硬件会对目标寄存器 `rd` 和源寄存器 `rs1` 是否为 `x0`（零寄存器）进行特殊判定，规则如下：
+
+1. **对于 `csrrw`/`csrrwi`（RW 操作）**：
+   - 如果 `rd == x0`，硬件**不执行读操作**。
+   - 不会从 CSRsUnit 读取 CSR 的当前值。
+   - 写入 CSR 操作仍然执行。
+
+2. **对于 `csrrs`/`csrrsi`（RS 操作）和 `csrrc`/`csrrci`（RC 操作）**：
+   - 如果 `rs1 == x0`（寄存器版本）或立即数为 0（立即数版本），硬件**不执行写操作**。
+   - 不会向 CSRsUnit 发送写请求。
+   - 读取操作仍然执行。
+
 ### 3.2 指令映射
 
 下表显示了 RISC-V CSR 指令如何映射到 ZicsrU 操作：
@@ -245,7 +259,8 @@ when(src1Ready) {
 }
 
 // 集体使能
-io.csrReadReq.valid := calculate
+val rdIsX0 = instructionReg.phyRd === 0.U // 判定目标寄存器是否为 x0
+io.csrReadReq.valid := calculate && !rdIsX0 // 根据 x0 判定控制 CSR 读请求
 io.prfReq.valid := calculate
 io.prfData.ready := calculate
 
@@ -274,14 +289,15 @@ val oprand1 = MuxCase(0.U, Seq(
 val newValue = MuxLookup(io.zicsrReq.zicsrOp, oldValue, Seq(
   ZicsrOp.RW -> oprand1,                      // CSRRW/CSRRWI: 新值 = RS1/Imm
   ZicsrOp.RS -> (oldValue | oprand1),         // CSRRS/CSRRSI: 新值 = 旧值 | RS1/Imm
-  ZicsrOp.RC -> (oldValue & ~oprand1),        // CSRRC/CSRRCI: 新值 = 旧值 & ~RS1/Imm                       
+  ZicsrOp.RC -> (oldValue & ~oprand1),        // CSRRC/CSRRCI: 新值 = 旧值 & ~RS1/Imm
 ))
 
 when(calculate) {
-  // 旧值存储
-  csrRdataReg := io.csrReadResp.data
-  exceptionReg := io.csrReadResp.exception
-  val exceptionValid = io.csrReadResp.exception.valid
+  // 根据 x0 判定控制读取返回值
+  val csrReadResp = Mux(rdIsX0, 0.asTypeOf(csrReadResp), io.csrReadResp) 
+  csrRdataReg := csrReadResp.data
+  exceptionReg := csrReadResp.exception
+  val exceptionValid = csrReadResp.exception.valid
   csrWdataReg := Mux(exceptionValid, 0.U, newValue)
   instructionReg.csrAddr := Mux(exceptionValid, 0.U, instructionReg.csrAddr)
 }
@@ -314,7 +330,8 @@ CSR 指令在 ROB 头部序列化执行，确保 CSR 操作的原子性：
 
 ```scala
 // CSR 写入请求
-io.csrWriteReq.valid := writeBack
+val src1IsX0 = instructionReg.data.src1Sel === Src1Sel.ZERO && instructionReg.data.imm === 0.U
+io.csrWriteReq.valid := writeBack && !src1IsX0 // 根据 x0 判定控制 CSR 写请求
 io.csrWriteReq.bits.csrAddr := instructionReg.csrAddr
 io.csrWriteReq.bits.privMode := instructionReg.privMode
 io.csrWriteReq.bits.data := csrWDataReg
@@ -328,12 +345,13 @@ ZicsrU 在向 CDB 广播之前将结果存储在结果寄存器中：
 when(calculate || canWrite) {
   resultBusy := true.B
 }
-when(io.cdb.fire()){
+when(io.cdb.fire){
   resultBusy := false.B
 }
 
 when(canWrite) {
-  exceptionReg := Mux(exceptionReg.valid, exceptionReg, io.csrWriteResp.exception)
+  val csrWriteResp = Mux(srcIsX0, 0.asTypeOf(csrWriteResp), io.csrWriteResp) // 根据 x0 判定控制写响应
+  exceptionReg := Mux(exceptionReg.valid, exceptionReg, csrWriteResp.exception)
 }
 
 // CDB 输出（使用 CDBMessage 结构体）
@@ -355,20 +373,23 @@ ZicsrU 的关键验证点：
 1. **操作正确性**：验证每个 ZicsrOp 操作产生正确的新值
 2. **旧值正确性**：验证广播到 CDB 的旧值与 CSR 读取值一致
 3. **操作数选择**：验证所有 `src1Sel` 选择器的正确操作数选择
-4. **序列化执行**：验证 CSR 写入只在 ROB 发出提交信号时才执行
+4. **冲刷**：验证在分支冲刷时状态和寄存器正确重置或更新
+5. **序列化执行**：验证 CSR 写入只在 ROB 发出提交信号时才执行
+6. **副作用规避（RW 操作）**：
+   - 验证当 `rd == x0` 时，CSRRW/CSRRWI 不执行 CSR 读操作
+   - 验证当 `rd == x0` 时，不将 CSR 旧值广播到 CDB
+   - 验证当 `rd != x0` 时，正常执行 CSR 读操作和广播
+7. **副作用规避（RS 操作）**：
+   - 验证当 `rs1 == x0`（CSRRS）或立即数为 0（CSRRSI）时，不执行 CSR 写操作
+   - 验证当 `rs1 == x0` 或立即数为 0 时，仍然执行 CSR 读操作并广播旧值
+   - 验证当 `rs1 != x0` 或立即数不为 0 时，正常执行 CSR 写操作
+8. **副作用规避（RC 操作）**：
+   - 验证当 `rs1 == x0`（CSRRC）或立即数为 0（CSRRCI）时，不执行 CSR 写操作
+   - 验证当 `rs1 == x0` 或立即数为 0 时，仍然执行 CSR 读操作并广播旧值
+   - 验证当 `rs1 != x0` 或立即数不为 0 时，正常执行 CSR 写操作
 
-### 5.2 集成验证
 
-关键集成验证点：
-
-1. **RS 接口**：验证正确的指令分派和操作数传递
-2. **PRF 接口**：验证正确的操作数读取
-3. **CSRsUnit 接口**：验证正确的 CSR 读取和写入
-4. **ROB 接口**：验证正确的序列化执行和提交信号处理
-5. **CDB 接口**：验证正确的结果广播和仲裁
-6. **异常传播**：验证异常信息正确传播到 CDB
-
-### 5.3 边界情况测试
+### 5.2 边界情况测试
 
 测试用例应覆盖：
 
@@ -378,4 +399,5 @@ ZicsrU 的关键验证点：
 4. **序列化执行**：多个 CSR 指令连续执行，验证序列化
 5. **异常处理**：验证 CSR 读取和写入异常的正确处理
 6. **ROB 队头检查**：验证 CSR 写入只在 ROB 队头时执行
-7. **边界 CSR 地址**：测试边界 CSR 地址的读写
+7. **冲刷**：在等待操作数和等待 ROB 头部信号时触发分支冲刷，验证状态重置和寄存器更新
+8. **复杂控制信号**：验证冲刷信号在各个状态到来都能被正确处理，比如与 commitReady 同时到来 （commitReady 为该指令在头部时一直拉高的长时程信号）
