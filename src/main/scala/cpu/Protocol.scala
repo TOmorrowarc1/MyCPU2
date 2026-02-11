@@ -325,6 +325,27 @@ class BruDrivenPacket extends Bundle with CPUConfig {
   val prfData = new PrfReadData
 }
 
+// Zicsr 与 CSRsUnit 的接口
+class CsrReadReq extends Bundle with CPUConfig {
+  val csrAddr = CsrAddrW
+  val privMode = PrivMode()
+}
+
+class CsrReadResp extends Bundle with CPUConfig {
+  val data = DataW
+  val exception = new Exception
+}
+
+class CsrWriteReq extends Bundle with CPUConfig {
+  val csrAddr = CsrAddrW
+  val privMode = PrivMode()
+  val data = DataW
+}
+
+class CsrWriteResp extends Bundle with CPUConfig {
+  val exception = new Exception
+}
+
 // 与 LSU 相关部分尚未定义 (TODO)
 
 // ============================================================================

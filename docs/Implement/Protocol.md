@@ -249,6 +249,17 @@ class BruRSDispatch extends Bundle with CPUConfig {
   val branchMask  = SnapshotMask
   val prediction  = new Prediction
 }
+
+// Dispatch -> ZicsrU 内置 RS
+class ZicsrDispatch extends Bundle with CPUConfig {
+  val zicsrOp = ZicsrOp()
+  val data = new DataReq
+  val csrAddr = CsrAddrW
+  val robId = RobTag
+  val phyRd = PhyTag
+  val branchMask = SnapshotMask
+  val privMode = PrivMode()
+}
 ```
 
 ## 4. 后端执行 (Backend: Issue, PRF, EU)
@@ -306,6 +317,27 @@ class AluDrivenPacket extends Bundle with CPUConfig {
 class BruDrivenPacket extends Bundle with CPUConfig {
   val bruReq = new BruReq
   val prfData = new PrfReadData
+}
+
+// Zicsr 与 CSRsUnit 的接口
+class CsrReadReq extends Bundle with CPUConfig {
+  val csrAddr = CsrAddrW
+  val privMode = PrivMode()
+}
+
+class CsrReadResp extends Bundle with CPUConfig {
+  val data = DataW
+  val exception = new Exception
+}
+
+class CsrWriteReq extends Bundle with CPUConfig {
+  val csrAddr = CsrAddrW
+  val privMode = PrivMode()
+  val data = DataW
+}
+
+class CsrWriteResp extends Bundle with CPUConfig {
+  val exception = new Exception
 }
 
 ```
