@@ -82,7 +82,7 @@ class ALU extends Module with CPUConfig {
     resultReg.data := result
     resultReg.robId := io.in.bits.aluReq.meta.robId
     resultReg.phyRd := io.in.bits.aluReq.meta.phyRd
-    resultReg.hasSideEffect := 0.U
+    resultReg.hasSideEffect := false.B
     resultReg.exception := defaultException
   }.otherwise {
     when(io.out.fire) {

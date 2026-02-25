@@ -117,7 +117,7 @@ class BRU extends Module with CPUConfig {
     resultReg.phyRd := io.in.bits.bruReq.meta.phyRd
     // 计算并保存结果（返回地址）
     resultReg.data := returnAddr
-    resultReg.hasSideEffect := 0.U
+    resultReg.hasSideEffect := false.B
     resultReg.exception := defaultException
   }.otherwise {
     // 一周期后清除决议信息

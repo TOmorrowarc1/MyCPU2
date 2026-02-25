@@ -47,7 +47,7 @@ class ZicsrU extends Module with CPUConfig {
   val csrRdataReg = Reg(UInt(32.W)) // CSR 读取值寄存器
   val csrWdataReg = Reg(UInt(32.W)) // CSR 写入值寄存器
   val exceptionReg = Reg(new Exception) // 异常信息寄存器
-  val branchMaskReg = RegInit(0.U(SnapshotMask)) // 分支掩码寄存器
+  val branchMaskReg = RegInit(0.U(4.W)) // 分支掩码寄存器
 
   // 默认异常信息（无异常）
   val defaultException = Wire(new Exception)

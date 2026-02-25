@@ -359,7 +359,7 @@ class CDBMessage extends Bundle with CPUConfig {
   val robId = RobTag // 用于 ROB 标记完成
   val phyRd = PhyTag // 用于 RS 唤醒依赖指令 & PRF 写入
   val data = DataW // 写入 PRF 的数据
-  val hasSideEffect = Bits(1.W) // 是否有副作用（非幂等 Load 指令专用）
+  val hasSideEffect = Bool() // 是否有副作用（非幂等 Load 指令专用）
   val exception = new Exception // 执行阶段产生的异常
 }
 
