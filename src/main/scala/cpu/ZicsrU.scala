@@ -24,6 +24,9 @@ class ZicsrU extends Module with CPUConfig {
 
     // 输出到 CDB
     val cdb = Decoupled(new CDBMessage)
+    val cdbIn = Flipped(Decoupled(new Bundle {
+      val phyRd = PhyTag
+    }))
 
     // 分支冲刷信号
     val branchFlush = Input(Bool())
@@ -33,21 +36,20 @@ class ZicsrU extends Module with CPUConfig {
   // 状态枚举
   object ZicsrState extends ChiselEnum {
     val IDLE = Value // 空闲状态
-    val WAIT_OPERANDS = Value // 等待操作数就绪
-    val WAIT_ROB_HEAD = Value // 等待 ROB 头部信号
+    val WAIT_READ = Value // 等待读取结果
+    val WAIT_CDB1 = Value // 等待第一次广播（读结果）
+    val WAIT_HEAD = Value // 等待 ROB 头部信号
+    val WAIT_CDB2 = Value // 等待第二次广播（写结果）
   }
 
   // 当前状态
   val state = RegInit(ZicsrState.IDLE)
-  // 结果寄存器忙标志
-  val resultBusy = RegInit(false.B)
 
   // 指令寄存器
   val instructionReg = Reg(new ZicsrDispatch)
   val csrRdataReg = Reg(UInt(32.W)) // CSR 读取值寄存器
   val csrWdataReg = Reg(UInt(32.W)) // CSR 写入值寄存器
   val exceptionReg = Reg(new Exception) // 异常信息寄存器
-  val branchMaskReg = RegInit(0.U(4.W)) // 分支掩码寄存器
 
   // 默认异常信息（无异常）
   val defaultException = Wire(new Exception)
@@ -57,45 +59,52 @@ class ZicsrU extends Module with CPUConfig {
 
   // 定义使能信号
   val busy = WireDefault(false.B) // 模块忙碌标志
-  val calculate = WireDefault(false.B) // 读取 Reg 与 CSR并计算新值
-  val writeBack = WireDefault(false.B) // 写回阶段，所有权移交至 ROB
-  val needFlush = WireDefault(false.B) // 需要冲刷
+  val canRead = WireDefault(false.B) // 读取 Reg 与 CSR 并计算新值
+  val canWrite = WireDefault(false.B) // 写回阶段，执行 CSR 写入
+  val boardcast = WireDefault(false.B) // 广播阶段，向 CDB 广播结果
+  val needFlush = WireDefault(false.B) // 可能被冲刷
 
+  // 计算使能
   needFlush := io.branchFlush
-
-  // 接收新指令
-  io.zicsrReq.ready := state === ZicsrState.IDLE && !needFlush
-
-  // 计算其他使能
-  calculate := !needFlush && state === ZicsrState.WAIT_OPERANDS && instructionReg.data.src1Ready
-  writeBack := !needFlush && state === ZicsrState.WAIT_ROB_HEAD && io.commitReady
+  io.zicsrReq.ready := !needFlush && state === ZicsrState.IDLE
+  canRead := !needFlush && state === ZicsrState.WAIT_READ && instructionReg.data.src1Ready
+  canWrite := !needFlush && state === ZicsrState.WAIT_HEAD && io.commitReady
+  boardcast := !needFlush && (state === ZicsrState.WAIT_CDB1 || state === ZicsrState.WAIT_CDB2)
 
   // 状态转移
   when(io.zicsrReq.fire) {
-    state := ZicsrState.WAIT_OPERANDS
+    state := ZicsrState.WAIT_READ
     instructionReg := io.zicsrReq.bits
-    branchMaskReg := io.zicsrReq.bits.branchMask
     exceptionReg := defaultException
-  }.elsewhen(calculate) {
-    state := ZicsrState.WAIT_ROB_HEAD
-  }.elsewhen(writeBack) {
+  }.elsewhen(canRead) {
+    state := ZicsrState.WAIT_CDB1
+  }.elsewhen(io.cdb.fire && state === ZicsrState.WAIT_CDB1) {
+    state := ZicsrState.WAIT_HEAD
+  }.elsewhen(canWrite) {
+    state := ZicsrState.WAIT_CDB2
+  }.elsewhen(io.cdb.fire && state === ZicsrState.WAIT_CDB2) {
     state := ZicsrState.IDLE
   }
 
   // 操作数就绪检测
-  val src1Ready = io.zicsrReq.valid && io.zicsrReq.bits.data.src1Ready
+  io.cdbIn.ready := state === ZicsrState.WAIT_READ
+  when(io.cdbIn.fire && io.cdbIn.bits.phyRd === instructionReg.data.src1Tag) {
+    instructionReg.data.src1Ready := true.B
+  }
 
   // 判定目标寄存器是否为 x0（用于 RW 操作的副作用规避）
   val rdIsX0 = instructionReg.phyRd === 0.U
 
   // 判定源操作数是否为 x0（用于 RS/RC 操作的副作用规避）
-  val src1IsX0 = instructionReg.data.src1Sel === Src1Sel.ZERO && instructionReg.data.imm === 0.U
+  val src1IsX0 =
+    (instructionReg.data.src1Sel === Src1Sel.ZERO && instructionReg.data.imm === 0.U) ||
+      (instructionReg.data.src1Sel === Src1Sel.REG && instructionReg.data.src1Tag === 0.U)
 
   // 集体使能
   // 根据 x0 判定控制 CSR 读请求（RW 操作：rd == x0 时不读）
-  io.csrReadReq.valid := calculate && !rdIsX0
-  io.prfReq.valid := calculate
-  io.prfData.ready := calculate
+  io.csrReadReq.valid := canRead && !rdIsX0
+  io.prfReq.valid := canRead
+  io.prfData.ready := canRead
 
   // 发送 CSR 读请求
   io.csrReadReq.bits.csrAddr := instructionReg.csrAddr
@@ -105,7 +114,7 @@ class ZicsrU extends Module with CPUConfig {
   io.prfReq.bits.raddr1 := instructionReg.data.src1Tag
   io.prfReq.bits.raddr2 := 0.U // CSR 指令不需要第二个操作数
 
-  val oldValue = Mux(calculate, io.csrReadResp.data, 0.U)
+  val oldValue = Mux(canRead, io.csrReadResp.data, 0.U)
   // 根据信息计算 CSR 之外的操作数
   val operand1 = MuxCase(
     0.U,
@@ -126,7 +135,7 @@ class ZicsrU extends Module with CPUConfig {
     )
   )
 
-  when(calculate) {
+  when(canRead) {
     // 根据 x0 判定控制读取返回值
     val csrReadResp = Mux(rdIsX0, 0.U.asTypeOf(new CsrReadResp), io.csrReadResp)
     csrRdataReg := csrReadResp.data
@@ -138,46 +147,47 @@ class ZicsrU extends Module with CPUConfig {
 
   // CSR 写入请求
   // 根据 x0 判定控制 CSR 写请求（RS/RC 操作：rs1 == x0 或立即数为 0 时不写）
-  io.csrWriteReq.valid := writeBack && !src1IsX0
+  io.csrWriteReq.valid := canWrite && !src1IsX0
   io.csrWriteReq.bits.csrAddr := instructionReg.csrAddr
   io.csrWriteReq.bits.privMode := instructionReg.privMode
   io.csrWriteReq.bits.data := csrWdataReg
 
-  when(writeBack) {
+  when(canWrite) {
     // 根据 x0 判定控制写响应
-    val csrWriteResp = Mux(src1IsX0, 0.U.asTypeOf(new CsrWriteResp), io.csrWriteResp)
-    exceptionReg := Mux(exceptionReg.valid, exceptionReg, csrWriteResp.exception)
-  }
-
-  // 结果寄存和广播
-  when(calculate || writeBack) {
-    resultBusy := true.B
-  }
-  when(io.cdb.fire) {
-    resultBusy := false.B
+    val csrWriteResp =
+      Mux(src1IsX0, 0.U.asTypeOf(new CsrWriteResp), io.csrWriteResp)
+    exceptionReg := Mux(
+      exceptionReg.valid,
+      exceptionReg,
+      csrWriteResp.exception
+    )
   }
 
   // CDB 输出（使用 CDBMessage 结构体）
-  io.cdb.valid := resultBusy && !needFlush
+  io.cdb.valid := boardcast
   io.cdb.bits.robId := instructionReg.robId
-  io.cdb.bits.phyRd := Mux(writeBack, 0.U, instructionReg.phyRd)
-  io.cdb.bits.data := Mux(writeBack, 0.U, csrRdataReg)
+  io.cdb.bits.phyRd := Mux(
+    state === ZicsrState.WAIT_CDB2,
+    instructionReg.phyRd,
+    0.U
+  )
+  io.cdb.bits.data := Mux(state === ZicsrState.WAIT_CDB2, csrRdataReg, 0.U)
   io.cdb.bits.hasSideEffect := false.B
   io.cdb.bits.exception := exceptionReg
 
   // 冲刷处理
-  when((state =/= ZicsrState.IDLE) && (io.branchOH & branchMaskReg) =/= 0.U) {
-    when(io.branchFlush) {
+  when(
+    (state =/= ZicsrState.IDLE) && (io.branchOH & instructionReg.branchMask) =/= 0.U
+  ) {
+    when(needFlush) {
       state := ZicsrState.IDLE
       instructionReg := 0.U.asTypeOf(instructionReg)
       csrRdataReg := 0.U
       csrWdataReg := 0.U
-      resultBusy := false.B
       exceptionReg := defaultException
-      branchMaskReg := 0.U
     }.otherwise {
       // 移除对应的分支依赖
-      branchMaskReg := branchMaskReg & ~io.branchOH
+      instructionReg.branchMask := instructionReg.branchMask & ~io.branchOH
     }
   }
 }

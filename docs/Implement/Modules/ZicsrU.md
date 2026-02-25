@@ -193,56 +193,66 @@ ZicsrU 支持 `ZicsrOp` 枚举中定义的以下操作：
 
 ## 4. 内部逻辑
 
+Zicsr 内部集成了保留站，计算单元，CSRsUnit 互动逻辑，广播逻辑与状态机多个逻辑模块，以实现跨周期的指令执行和状态维护。
+
 ### 4.1 维护状态
 
-每一条 CSR 指令在 ZicsrU 内部以如下方式原子化执行：先进入等待状态直至所有操作数就绪，之后访问 CSRsUnit 获得结果，计算出结果并进行第一次提交，等待指令到达 ROB 头部返回信号，此时执行 CSR 写入，最后再次广播结果使 ROB 能够 Commit 这条指令。如果等待中途出现 branchFlush 信号可能被冲刷。
-
+在 ZicsrU 内部维护如下控制状态以跟踪指令的执行阶段：
+1. 空闲状态 IDLE：此时 ZicsrU 内部没有指令。
+2. 等待读取 WAIT_READ：当 Dispatch 模块发送 CSR 指令且 ZicsrU 在 IDLE 时模块切换到 WAIT_READ，将指令注入保留站。
+3. 等待第一次广播 WAIT_CDB1：当所有操作数就绪时，CSRsUnit 接受保留站中记录读请求（注意异常与副作用处理），当周期返回结果并将结果推入结果寄存器，模块切换到 WAIT_CDB1 状态。
+4. 等待 ROB 头部返回信息 WAIT_HEAD：当 ZicsrU 在 WAIT_CDB1 状态时将结果广播到 CDB（第一次广播不包含结果，只广播完成信号到 ROB），模块切换到 WAIT_HEAD 状态，等待 ROB 头部返回信号。
 > CSRs 的读取因为有幂等性可以投机执行，但是写入必须等到 ROB 头部才能完成。
+5. 等待第二次广播 WAIT_CDB2：接收到ROB 头部返回信号时执行 CSR 写入，再次将当周期结果推入结果寄存器，模块切换状态到 WAIT_CDB2。最后再次广播结果使 ROB 能够 Commit 这条指令，将状态切换回 IDLE。
+> 以上为无 branchFlush 情况。如果等待中途出现 branchFlush 信号，则当周期不进行正常状态切换，且若 branchOH 与保留的 branchMask 相交则冲刷整个模块，将状态置换回 IDLE。
 
-因此有如下状态需要维护：
-1. **状态记录**：记录当前指令的状态（IDLE 或等待操作数或等待 ROB 头部信号）
-2. **指令寄存**：储存指令信息—— CSR 地址、操作数、ROB ID、目标物理寄存器，ZicsrOp 、计算出的新值与新的异常等。
+在控制状态之外还需要维护如下中间值：
+1. **指令寄存**：储存指令信息 —— CSR 地址、操作数值与状态、ROB ID、目标物理寄存器、ZicsrOp、分支掩码等。
+2. **中间结果**：读取获得的 CSR 当前值、异常信息，等待广播到 CDB。
 
 ```scala
 // 状态枚举
 object ZicsrState extends ChiselEnum {
   val IDLE = Value           // 空闲状态
-  val WAIT_OPERANDS = Value  // 等待操作数就绪
-  val WAIT_ROB_HEAD = Value  // 等待 ROB 头部信号
+  val WAIT_READ = Value        // 等待读取结果
+  val WAIT_CDB1 = Value        // 等待第一次广播（读结果）
+  val WAIT_HEAD = Value        // 等待 ROB 头部信号
+  val WAIT_CDB2 = Value        // 等待第二次广播（写结果）
 }
 
 // 当前状态
 val state = RegInit(ZicsrState.IDLE)
-// 结果寄存器忙标志
-val resultBusy = RegInit(false.B)
 
-// 指令寄存器
-val instructionReg = Reg(new ZicsrDispatch)
+val instructionReg = Reg(new ZicsrDispatch) // 指令寄存器
 val csrRdataReg = Reg(UInt(32.W))  // CSR 读取值寄存器
 val csrWdataReg = Reg(UInt(32.W))  // CSR 写入值寄存器
 val exceptionReg = Reg(new Exception) // 异常信息寄存器
 
 // 定义使能信号
 val busy = WireDefault(false.B) // 模块忙碌标志
-val calculate = WireDefault(false.B) // 读取 Reg 与 CSR并计算新值
-val writeBack = WireDefault(false.B) // 写回阶段，所有权移交至 ROB
-val needFlush = WireDefault(false.B) // 需要冲刷
+val canRead = WireDefault(false.B) // 读取 Reg 与 CSR 并计算新值
+val canWrite = WireDefault(false.B) // 写回阶段，所有权移交至 ROB
+val boardcast = WireDefault(false.B) // 广播阶段，向 CDB 广播结果
+val needFlush = WireDefault(false.B) // 可能被冲刷
 
-// 忙标志
-busy := state =/= ZicsrState.IDLE
+// 计算使能
 needFlush := io.branchFlush
-// 计算其他使能
-io.zicsrReq.ready := !busy && !needFlush
-calculate := !needFlush && state === ZicsrState.WAIT_OPERANDS && instructionReg.data.src1Ready
-writeBack := !needFlush && state === ZicsrState.WAIT_ROB_HEAD && io.commitReady
+io.zicsrReq.ready := !needFlush && state === ZicsrState.IDLE
+canRead := !needFlush && state === ZicsrState.WAIT_READ && instructionReg.data.src1Ready
+canWrite := !needFlush && state === ZicsrState.WAIT_HEAD && io.commitReady
+boardcast := !needFlush && (state === ZicsrState.WAIT_CDB1 || state === ZicsrState.WAIT_CDB2)
 
 // 状态转移
 when(io.zicsrReq.fire()) {
-  state := ZicsrState.WAIT_OPERANDS
+  state := ZicsrState.WAIT_READ
   instructionReg := io.zicsrReq.bits
-}.elsewhen(calculate) {
-  state := ZicsrState.WAIT_ROB_HEAD
-}.elsewhen(writeBack) {
+}.elsewhen(canRead) {
+  state := ZicsrState.WAIT_CDB1
+}.elsewhen(io.CDB.fire() && state === ZicsrState.WAIT_CDB1) {
+  state := ZicsrState.WAIT_HEAD
+}.elsewhen(canWrite) {
+  state := ZicsrState.WAIT_CDB2
+}.elsewhen(io.CDB.fire() && state === ZicsrState.WAIT_CDB2) {
   state := ZicsrState.IDLE
 }
 ```
@@ -260,9 +270,9 @@ when(src1Ready) {
 
 // 集体使能
 val rdIsX0 = instructionReg.phyRd === 0.U // 判定目标寄存器是否为 x0
-io.csrReadReq.valid := calculate && !rdIsX0 // 根据 x0 判定控制 CSR 读请求
-io.prfReq.valid := calculate
-io.prfData.ready := calculate
+io.csrReadReq.valid := canRead && !rdIsX0 // 根据 x0 判定控制 CSR 读请求
+io.prfReq.valid := canRead
+io.prfData.ready := canRead
 
 // 发送 CSR 读请求
 io.csrReadReq.bits.csrAddr := instructionReg.csrAddr
@@ -272,7 +282,7 @@ io.csrReadReq.bits.privMode := instructionReg.privMode
 io.prfReq.bits.raddr1 := instructionReg.data.src1Tag
 io.prfReq.bits.raddr2 := instructionReg.data.src2Tag
 
-val oldValue = Mux(calculate, io.csrReadResp.data, 0.U)
+val oldValue = Mux(canRead, io.csrReadResp.data, 0.U)
 // 根据信息计算 CSR 之外的操作数
 val oprand1 = MuxCase(0.U, Seq(
   instructionReg.data.src1Sel === Src1Sel.REG -> io.prfData.bits.rdata1,
@@ -292,7 +302,7 @@ val newValue = MuxLookup(io.zicsrReq.zicsrOp, oldValue, Seq(
   ZicsrOp.RC -> (oldValue & ~oprand1),        // CSRRC/CSRRCI: 新值 = 旧值 & ~RS1/Imm
 ))
 
-when(calculate) {
+when(canRead) {
   // 根据 x0 判定控制读取返回值
   val csrReadResp = Mux(rdIsX0, 0.asTypeOf(csrReadResp), io.csrReadResp) 
   csrRdataReg := csrReadResp.data
@@ -309,7 +319,7 @@ ZicsrU 在等待操作数或 ROB 头部信号时可能被分支冲刷，因此�
 
 ```scala
 when((state =/= ZiscrState.IDLE) && (io.branchOH & instructionReg.branchMask) =/= 0.U) {
-  when(io.branchFlush) {
+  when(needFlush) {
     state := ZicsrState.IDLE
     instructionReg := 0.U.asTypeOf(instructionReg)
     csrRdataReg := 0.U
@@ -330,8 +340,8 @@ CSR 指令在 ROB 头部序列化执行，确保 CSR 操作的原子性：
 
 ```scala
 // CSR 写入请求
-val src1IsX0 = instructionReg.data.src1Sel === Src1Sel.ZERO && instructionReg.data.imm === 0.U
-io.csrWriteReq.valid := writeBack && !src1IsX0 // 根据 x0 判定控制 CSR 写请求
+val src1IsX0 = (instructionReg.data.src1Sel === Src1Sel.ZERO && instructionReg.data.imm === 0.U) || (instructionReg.data.src1Sel === Src1Sel.REG && instructionReg.data.src1Tag === 0.U)
+io.csrWriteReq.valid := canWrite && !src1IsX0 // 根据 x0 判定控制 CSR 写请求
 io.csrWriteReq.bits.csrAddr := instructionReg.csrAddr
 io.csrWriteReq.bits.privMode := instructionReg.privMode
 io.csrWriteReq.bits.data := csrWDataReg
@@ -342,23 +352,16 @@ io.csrWriteReq.bits.data := csrWDataReg
 ZicsrU 在向 CDB 广播之前将结果存储在结果寄存器中：
 
 ```scala
-when(calculate || canWrite) {
-  resultBusy := true.B
-}
-when(io.cdb.fire){
-  resultBusy := false.B
-}
-
 when(canWrite) {
   val csrWriteResp = Mux(srcIsX0, 0.asTypeOf(csrWriteResp), io.csrWriteResp) // 根据 x0 判定控制写响应
   exceptionReg := Mux(exceptionReg.valid, exceptionReg, csrWriteResp.exception)
 }
 
 // CDB 输出（使用 CDBMessage 结构体）
-io.cdb.valid := resultBusy && !needFlush
+io.cdb.valid := boardcast
 io.cdb.bits.robId := instructionReg.robId
-io.cdb.bits.phyRd := Mux(canWrite, 0.U, instructionReg.phyRd)
-io.cdb.bits.data := Mux(canWrite, 0.U, resultReg)
+io.cdb.bits.phyRd := Mux(canWrite, instructionReg.phyRd, 0.U)
+io.cdb.bits.data := Mux(canWrite, resultReg, 0.U)
 io.cdb.bits.hasSideEffect := false.b
 io.cdb.bits.exception := exceptionReg
 ```
