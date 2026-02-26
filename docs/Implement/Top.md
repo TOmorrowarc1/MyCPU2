@@ -156,6 +156,7 @@
     *   Decoder 与 RAT : 。新入队指令的 `{pc, Exception, Prediction, isSpecialInstr}` 与 `{LogicRd, PhyRd, PreRd, BranchMask}`。
     *   `CBD`: 标记指令完成或待机，并携带物理目标寄存器结果的 `{RobID, Exception, phyRd, data}`。
     *   `BRU`: 接收 BRU 计算完成的 `{snapshotId, branchFlush, redirectPC}`。
+    *   `globalFlush` 信号：来自 CSRsUnit 的全局冲刷信号，代表异常或中断处理。
 *   **逻辑简述**：
     *   **队列维护**：维护一个最大长度确定的循环队列，包含队头 `robHead` 与队尾 `robTail`，每个 Entry 包含如下内容：
         * 状态位：`busy`, `completed` 对应是否为空与是否完成。
@@ -171,21 +172,20 @@
     *   **分支冲刷**：当 BRU 送入 `{snapshotId, branchFlush, redirectPC}` 时，若 `branchFlush` 有效则根据 `snapshotId` 定位到对应分支指令，清除所有依赖该分支的 Entry（通过 `branchMask` 位运算）并更新 `IEpoch`，若否则单纯移除 `branchMask`。依据预测结果更新 `prediction` 字段以便提交时用于更新 BTB。 
     *   **提交状态机**：
         1.  **Check Head**：若 `!completed`，等待。
-        2.  **Handle Exception**：若 `exception.valid`，触发 `globalFlush`，更新 CSR (`mcause/mepc`)，跳转 `mtvec`。
+        2.  **Handle Exception**：若提交，则向 CSRsUnit 输出该指令 exception 与 pc 信息，以便 CSRsUnit 做出 Trap 处理。
         3.  **Handle Serialization**：
             *   若为 **Store** 或 **hasSideEffect 为 1** ：在局部维护一个状态机，进入 `wait_done` 模式并发信号给 LSU，等待从总线传来的第二次对应 `robId` 信号然后退休。
                 > 不排除在过程中出现异常可能，ROB 行为取决于第二次总线信号。
             *   若为 **CSR Write**：在局部维护一个状态机，发信号给 ZICSRU 并等待总线上的第二次对应信号，然后触发 `globalFlush` 并退休。
                 > 不排除在过程中出现异常可能，ROB 行为取决于第二次总线信号。
-            *   若为 **xRET**：触发 `globalFlush`，向 CSRsUnit 发送对应信息，行为类似于 handle exception。
+            *   若为 **xRET**：向 CSRsUnit 发送对应信息，行为类似于 handle exception。
             *   若为 **WFI**：当做 NOP 处理，直接退休。
-            *   若为 **FENCE.I**：直接退休。
-            *   若为 **SFENCE.VMA**：
+            *   若为 **FENCE.I**：拉高对应 `fence.i` 信号，等待 CBD 上传回的 Ack 信号，收到信号后提交。
+            *   若为 **SFENCE.VMA**：同上，对应 `sfence.v` 信号。
         4.  **Normal Retire**：通知 RAT `Retire(lrd, prd, p_old)`，释放 `p_old` 到 Free List，令 `robHead` 前进一位。
     *   **维护纪元**：若 `globalFlush` 发生，更新 `DEpoch`。
     *   **维护 CSRPending**：当 CSR 指令或 xRET 指令或 `FENCE` `FENCE.I` `SFENCE` 入队时，拉高 `CSRPending` 信号，在这类指令提交时拉低该信号（由于阻塞取值一段时间内只有一条该类指令）。
 *   **输出**：
-    *   `globalFlush`。
     *   纪元信息：`IEpoch` `DEpoch`。
     *   取值暂停信息：`CSRPending`。
     *   指令 Ack 信息：`storeEnable` `csrEnable`。
@@ -238,14 +238,14 @@ class WideAXI4Bundle extends Bundle {
   // --- 读路径 ---
   val ar = Decoupled(new Bundle {
     val addr = UInt(32.W)
-    val id   = new AxiId        // 事务 ID (区分 I/D Cache)
+    val id   = new AXIID        // 事务 ID (区分 I/D Cache)
     val len  = UInt(8.W)        // Burst 长度，宽总线通常为 0
     val user = new AXIContext   // 携带元数据
   })
   
   val r = Flipped(Decoupled(new Bundle {
     val data = UInt(512.W)      // 512-bit 宽数据
-    val id   = new AxiId
+    val id   = new AXIID
     val last = Bool()           // Burst 结束标志，宽总线返回结果当周期拉高
     val user = new AXIContext   // 回传元数据
   }))
@@ -253,7 +253,7 @@ class WideAXI4Bundle extends Bundle {
   // --- 写路径 ---
   val aw = Decoupled(new Bundle {
     val addr = UInt(32.W)
-    val id   = new AxiId
+    val id   = new AXIID
     val len  = UInt(8.W)
     val user = new AXIContext
   })
@@ -265,7 +265,7 @@ class WideAXI4Bundle extends Bundle {
   })
   
   val b = Flipped(Decoupled(new Bundle {
-    val id   = new AxiId
+    val id   = new AXIID
     val user = new AXIContext
   }))
 }
@@ -381,7 +381,7 @@ object RamState extends ChiselEnum {
 *   **握手输出**：
     *   `d_cache.req.ready := can_issue && d_wins`。
     *   `i_cache.req.ready := can_issue && i_wins`。
-*   **状态迁移**：当 `main_mem.ar.fire` 或 `main_mem.aw.fire` 时，`is_busy` 置 1，将对应请求转发到主线，同时 AxiId 规定 I-cache 为 0，D-cache 为 1。
+*   **状态迁移**：当 `main_mem.ar.fire` 或 `main_mem.aw.fire` 时，`is_busy` 置 1，将对应请求转发到主线，同时 AXIID 规定 I-cache 为 0，D-cache 为 1。
 
 ##### 4.2.4.2 结果回传处理 (分发逻辑)
 

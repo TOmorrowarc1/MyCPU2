@@ -22,7 +22,7 @@ Decoder 模块是 Tomasulo 架构中的关键组件，负责将指令流解析�
 
 ### 输出
 - 向 RAT 发送：[`RenameReq`](../../Implement/Protocol.md:184-189) `{rs1, rs2, rd, isBranch}`
-- 向 ROB 发送：[`ROBInitControlPacket`](../../Implement/Protocol.md:154-159) `{pc, prediction, exception, specialInstr}`
+- 向 ROB 发送：[`ROBInitControl`](../../Implement/Protocol.md:154-159) `{pc, prediction, exception, specialInstr}`
 - 向 RS 发送：[`DispatchPacket`](../../Implement/Protocol.md:173-181) `{robId, microOp, pc, imm, privMode, prediction, exception}`
 - 向 Fetcher 发送：`IFStall`
 
@@ -161,7 +161,7 @@ class Decoder extends Module with CPUConfig {
     val renameReq = Decoupled(new RenameReq)
 
     // 向 ROB 发送初始化信息
-    val robInit = Decoupled(new ROBInitControlPacket)
+    val robInit = Decoupled(new ROBInitControl)
 
     // 向 RS 发送分派信息
     val dispatch = Decoupled(new DispatchPacket)
@@ -619,7 +619,7 @@ class Decoder extends Module with CPUConfig {
     val renameReq = Decoupled(new RenameReq)
     
     // 向 ROB 发送初始化信息
-    val robInit = Decoupled(new ROBInitControlPacket)
+    val robInit = Decoupled(new ROBInitControl)
     
     // 向 RS 发送分派信息
     val dispatch = Decoupled(new DispatchPacket)

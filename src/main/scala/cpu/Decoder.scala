@@ -20,7 +20,7 @@ class Decoder extends Module with CPUConfig {
     val renameReq = Decoupled(new RenameReq)
 
     // 向 ROB 发送初始化信息
-    val robInit = Decoupled(new ROBInitControlPacket)
+    val robInit = Decoupled(new ROBInitControl)
 
     // 向 RS 发送分派信息
     val dispatch = Decoupled(new DispatchPacket)

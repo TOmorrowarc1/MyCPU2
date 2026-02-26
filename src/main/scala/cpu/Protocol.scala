@@ -120,6 +120,11 @@ object SpecialInstr extends ChiselEnum {
       NONE = Value
 }
 
+// AXI 事务 ID (区分 I/D Cache)
+object AXIID extends ChiselEnum {
+  val I_CACHE, D_CACHE = Value
+}
+
 // ============================================================================
 // 1. 通用元数据
 // ============================================================================
@@ -156,7 +161,7 @@ class IDecodePacket extends Bundle with CPUConfig {
 }
 
 // Decoder -> ROB (ROB 占位)
-class ROBInitControlPacket extends Bundle with CPUConfig {
+class ROBInitControl extends Bundle with CPUConfig {
   val pc = AddrW
   val prediction = new Prediction
   val exception = new Exception
@@ -369,12 +374,6 @@ class CDBMessage extends Bundle with CPUConfig {
 
 // 6.1 AXI4 总线接口
 
-// AXI 事务 ID (区分 I/D Cache)
-object AxiId extends ChiselEnum {
-  val I_CACHE = Value(0.U) // 指令 Cache
-  val D_CACHE = Value(1.U) // 数据 Cache
-}
-
 // AXI 元数据 (上下文)
 class AXIContext extends Bundle {
   val epoch = UInt(2.W) // 用于回传上下文信息
@@ -385,14 +384,14 @@ class WideAXI4Bundle extends Bundle {
   // --- 读路径 ---
   val ar = Decoupled(new Bundle {
     val addr = UInt(32.W)
-    val id = AxiId() // 事务 ID (区分 I/D Cache)
+    val id = AXIID() // 事务 ID (区分 I/D Cache)
     val len = UInt(8.W) // Burst 长度，宽总线通常为 0
     val user = new AXIContext // 携带元数据
   })
 
   val r = Flipped(Decoupled(new Bundle {
     val data = UInt(512.W) // 512-bit 宽数据
-    val id = AxiId()
+    val id = AXIID()
     val last = Bool() // Burst 结束标志，宽总线返回结果当周期拉高
     val user = new AXIContext // 回传元数据
   }))
@@ -400,7 +399,7 @@ class WideAXI4Bundle extends Bundle {
   // --- 写路径 ---
   val aw = Decoupled(new Bundle {
     val addr = UInt(32.W)
-    val id = AxiId()
+    val id = AXIID()
     val len = UInt(8.W)
     val user = new AXIContext
   })
@@ -412,7 +411,7 @@ class WideAXI4Bundle extends Bundle {
   })
 
   val b = Flipped(Decoupled(new Bundle {
-    val id = AxiId()
+    val id = AXIID()
     val user = new AXIContext
   }))
 }
