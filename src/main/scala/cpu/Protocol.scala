@@ -16,6 +16,7 @@ trait CPUConfig {
   val CsrAddrWidth = 12
 
   // 规模参数 (建议参数化，这里先给定具体位宽)
+  val RobSize = 32
   val RobIdWidth = 5 // 支持 32 条指令乱序
   val PhyRegIdWidth = 7 // 128 个物理寄存器
   val ArchRegIdWidth = 5 // 32 个架构寄存器
