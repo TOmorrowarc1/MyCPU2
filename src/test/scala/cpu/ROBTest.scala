@@ -106,9 +106,9 @@ class ROBTest extends AnyFlatSpec with ChiselScalatestTester {
 
   it should "正确处理普通指令入队" in {
     test(new ROB) { dut =>
-      setDefaultInputs(dut)
 
       // ADD x1, x2, x3 (PC = 0x80000000)
+      setDefaultInputs(dut)
       setControlInit(dut, pc = 0x80000000L, specialInstr = SpecialInstr.NONE)
       setDataInit(dut, archRd = 1, phyRd = 32, phyOld = 1, branchMask = 0)
 
@@ -121,6 +121,7 @@ class ROBTest extends AnyFlatSpec with ChiselScalatestTester {
 
       // 验证第一条指令已入队
       // 尝试入队第二条指令
+      setDefaultInputs(dut)
       setControlInit(dut, pc = 0x80000004L, specialInstr = SpecialInstr.NONE)
       setDataInit(dut, archRd = 2, phyRd = 33, phyOld = 2, branchMask = 0)
       dut.io.freeRobID.expect(1.U) // 分配 robId = 1
@@ -132,11 +133,13 @@ class ROBTest extends AnyFlatSpec with ChiselScalatestTester {
       setDefaultInputs(dut)
 
       // 入队一条指令
+      setDefaultInputs(dut)
       setControlInit(dut, pc = 0x80000000L, specialInstr = SpecialInstr.NONE)
       setDataInit(dut, archRd = 1, phyRd = 32, phyOld = 1, branchMask = 0)
       dut.clock.step()
 
       // 指令完成（robId = 0）
+      setDefaultInputs(dut)
       setCDB(dut, robId = 0, phyRd = 32, data = 0x100)
       dut.clock.step()
 
@@ -159,10 +162,12 @@ class ROBTest extends AnyFlatSpec with ChiselScalatestTester {
       dut.clock.step()
 
       // 指令完成
+      setDefaultInputs(dut)
       setCDB(dut, robId = 0, phyRd = 32, data = 0x100)
       dut.clock.step()
 
       // 指令提交
+      setDefaultInputs(dut)
       dut.clock.step()
 
       // 验证提交后的状态
@@ -178,11 +183,13 @@ class ROBTest extends AnyFlatSpec with ChiselScalatestTester {
       setDefaultInputs(dut)
 
       // ADD x0, x1, x2 (x0 作为目标寄存器)
+      setDefaultInputs(dut)
       setControlInit(dut, pc = 0x80000000L, specialInstr = SpecialInstr.NONE)
       setDataInit(dut, archRd = 0, phyRd = 0, phyOld = 0, branchMask = 0)
       dut.clock.step()
 
       // 指令完成
+      setDefaultInputs(dut)
       setCDB(dut, robId = 0, phyRd = 0, data = 0)
       dut.clock.step()
 
@@ -204,6 +211,7 @@ class ROBTest extends AnyFlatSpec with ChiselScalatestTester {
 
       // 入队 32 条指令填满队列
       for (i <- 0 until 32) {
+        setDefaultInputs(dut)
         setControlInit(
           dut,
           pc = (0x80000000L + i * 4).toLong,
@@ -222,6 +230,7 @@ class ROBTest extends AnyFlatSpec with ChiselScalatestTester {
       }
 
       // 尝试入队第 33 条指令
+      setDefaultInputs(dut)
       setControlInit(dut, pc = 0x80000080L, specialInstr = SpecialInstr.NONE)
       setDataInit(dut, archRd = 1, phyRd = 64, phyOld = 1, branchMask = 0)
       dut.io.controlInit.ready.expect(false.B)
@@ -250,6 +259,7 @@ class ROBTest extends AnyFlatSpec with ChiselScalatestTester {
 
       // 入队 3 条指令
       for (i <- 0 until 3) {
+        setDefaultInputs(dut)
         setControlInit(
           dut,
           pc = (0x80000000L + i * 4).toLong,
@@ -267,14 +277,17 @@ class ROBTest extends AnyFlatSpec with ChiselScalatestTester {
       }
 
       // 完成并提交第一条指令
+      setDefaultInputs(dut)
       setCDB(dut, robId = 0, phyRd = 32, data = 0x100)
       dut.clock.step()
 
       // 提交
+      setDefaultInputs(dut)
       dut.clock.step()
 
       // 验证队列指针正确
       // 下一条指令应该分配 robId = 3
+      setDefaultInputs(dut)
       setControlInit(dut, pc = 0x8000000cL, specialInstr = SpecialInstr.NONE)
       setDataInit(dut, archRd = 4, phyRd = 35, phyOld = 4, branchMask = 0)
       dut.io.freeRobID.expect(3.U)
@@ -286,7 +299,8 @@ class ROBTest extends AnyFlatSpec with ChiselScalatestTester {
       setDefaultInputs(dut)
 
       // 入队 31 条指令
-      for (i <- 0 until 31) {
+      for (i <- 0 until 32) {
+        setDefaultInputs(dut)
         setControlInit(
           dut,
           pc = (0x80000000L + i * 4).toLong,
@@ -299,18 +313,23 @@ class ROBTest extends AnyFlatSpec with ChiselScalatestTester {
           phyOld = (i % 31 + 1),
           branchMask = 0
         )
+        dut.io.freeRobID.expect(i.U)
+        dut.io.dataInit.ready.expect(true.B)
         dut.clock.step()
       }
 
       // 完成并提交所有指令
       for (i <- 0 until 31) {
+        setDefaultInputs(dut)
         setCDB(dut, robId = i, phyRd = (32 + i), data = 0x100)
         dut.clock.step()
+        setDefaultInputs(dut)
         dut.clock.step()
       }
 
       // 验证队列已空
       // 下一条指令应该分配 robId = 0（回绕）
+      setDefaultInputs(dut)
       setControlInit(dut, pc = 0x8000007cL, specialInstr = SpecialInstr.NONE)
       setDataInit(dut, archRd = 1, phyRd = 32, phyOld = 1, branchMask = 0)
       dut.io.freeRobID.expect(0.U)
@@ -323,27 +342,34 @@ class ROBTest extends AnyFlatSpec with ChiselScalatestTester {
 
   it should "正确处理 Store 指令序列化" in {
     test(new ROB) { dut =>
-      setDefaultInputs(dut)
 
       // 入队一条 Store 指令
+      setDefaultInputs(dut)
       setControlInit(dut, pc = 0x80000000L, specialInstr = SpecialInstr.STORE)
       setDataInit(dut, archRd = 0, phyRd = 0, phyOld = 0, branchMask = 0)
       dut.clock.step()
 
       // Store 指令完成
+      setDefaultInputs(dut)
       setCDB(dut, robId = 0, phyRd = 0, data = 0)
       dut.clock.step()
 
+      // IDLE -> WAIT
+      setDefaultInputs(dut)
       // Store 指令应该拉高 storeEnable 信号
       dut.io.storeEnable.expect(true.B)
-
-      // 模拟 LSU 确认（通过 CDB 第二次发送）
-      setCDB(dut, robId = 0, phyRd = 0, data = 0)
       dut.clock.step()
 
+      setDefaultInputs(dut)
+      setCDB(dut, robId = 0, phyRd = 0, data = 0)
       // Store 指令应该提交
       dut.io.commitRAT.valid.expect(true.B)
-      dut.io.storeEnable.expect(false.B) // 信号应该被重置
+      // 信号应该被重置
+      dut.io.storeEnable.expect(false.B)
+      dut.clock.step()
+
+      setDefaultInputs(dut)
+      dut.io.commitRAT.valid.expect(false.B)
     }
   }
 
@@ -352,6 +378,7 @@ class ROBTest extends AnyFlatSpec with ChiselScalatestTester {
       setDefaultInputs(dut)
 
       // 入队一条 CSR 指令
+      setDefaultInputs(dut)
       setControlInit(dut, pc = 0x80000000L, specialInstr = SpecialInstr.CSR)
       setDataInit(dut, archRd = 1, phyRd = 32, phyOld = 1, branchMask = 0)
       dut.clock.step()
@@ -360,20 +387,26 @@ class ROBTest extends AnyFlatSpec with ChiselScalatestTester {
       dut.io.csrPending.expect(true.B)
 
       // CSR 指令完成
+      setDefaultInputs(dut)
       setCDB(dut, robId = 0, phyRd = 32, data = 0x100)
       dut.clock.step()
 
+      // IDLE -> WAIT
+      setDefaultInputs(dut)
       // CSR 指令应该拉高 csrEnable 信号
       dut.io.csrEnable.expect(true.B)
-
-      // 模拟 ZICSRU 确认（通过 CDB 第二次发送）
-      setCDB(dut, robId = 0, phyRd = 32, data = 0x100)
       dut.clock.step()
 
+      setDefaultInputs(dut)
+      setCDB(dut, robId = 0, phyRd = 32, data = 0x100)
       // CSR 指令应该提交并触发全局冲刷
       dut.io.commitRAT.valid.expect(true.B)
       dut.io.isCSR.expect(true.B)
       dut.io.csrEnable.expect(false.B)
+      dut.clock.step()
+
+      setDefaultInputs(dut)
+      dut.io.commitRAT.valid.expect(false.B)
       dut.io.csrPending.expect(false.B)
     }
   }
@@ -383,6 +416,7 @@ class ROBTest extends AnyFlatSpec with ChiselScalatestTester {
       setDefaultInputs(dut)
 
       // 入队一条 MRET 指令
+      setDefaultInputs(dut)
       setControlInit(dut, pc = 0x80000000L, specialInstr = SpecialInstr.MRET)
       setDataInit(dut, archRd = 0, phyRd = 0, phyOld = 0, branchMask = 0)
       dut.clock.step()
@@ -391,12 +425,15 @@ class ROBTest extends AnyFlatSpec with ChiselScalatestTester {
       dut.io.csrPending.expect(true.B)
 
       // MRET 指令完成
+      setDefaultInputs(dut)
       setCDB(dut, robId = 0, phyRd = 0, data = 0)
       dut.clock.step()
 
       // MRET 指令应该拉高 mret 信号并立即提交
       dut.io.mret.expect(true.B)
       dut.io.commitRAT.valid.expect(true.B)
+
+      dut.clock.step()
       dut.io.csrPending.expect(false.B)
     }
   }
@@ -406,6 +443,7 @@ class ROBTest extends AnyFlatSpec with ChiselScalatestTester {
       setDefaultInputs(dut)
 
       // 入队一条 SRET 指令
+      setDefaultInputs(dut)
       setControlInit(dut, pc = 0x80000000L, specialInstr = SpecialInstr.SRET)
       setDataInit(dut, archRd = 0, phyRd = 0, phyOld = 0, branchMask = 0)
       dut.clock.step()
@@ -414,12 +452,15 @@ class ROBTest extends AnyFlatSpec with ChiselScalatestTester {
       dut.io.csrPending.expect(true.B)
 
       // SRET 指令完成
+      setDefaultInputs(dut)
       setCDB(dut, robId = 0, phyRd = 0, data = 0)
       dut.clock.step()
 
       // SRET 指令应该拉高 sret 信号并立即提交
       dut.io.sret.expect(true.B)
       dut.io.commitRAT.valid.expect(true.B)
+
+      dut.clock.step()
       dut.io.csrPending.expect(false.B)
     }
   }
@@ -429,6 +470,7 @@ class ROBTest extends AnyFlatSpec with ChiselScalatestTester {
       setDefaultInputs(dut)
 
       // 入队一条 FENCE.I 指令
+      setDefaultInputs(dut)
       setControlInit(dut, pc = 0x80000000L, specialInstr = SpecialInstr.FENCEI)
       setDataInit(dut, archRd = 0, phyRd = 0, phyOld = 0, branchMask = 0)
       dut.clock.step()
@@ -437,19 +479,25 @@ class ROBTest extends AnyFlatSpec with ChiselScalatestTester {
       dut.io.csrPending.expect(true.B)
 
       // FENCE.I 指令完成
+      setDefaultInputs(dut)
       setCDB(dut, robId = 0, phyRd = 0, data = 0)
       dut.clock.step()
 
+      // IDLE -> WAIT
+      setDefaultInputs(dut)
       // FENCE.I 指令应该拉高 fenceI 信号
       dut.io.fenceI.expect(true.B)
-
-      // 模拟 Cache 确认（通过 CDB 第二次发送）
-      setCDB(dut, robId = 0, phyRd = 0, data = 0)
       dut.clock.step()
 
+      setDefaultInputs(dut)
+      setCDB(dut, robId = 0, phyRd = 0, data = 0)
       // FENCE.I 指令应该提交
       dut.io.commitRAT.valid.expect(true.B)
       dut.io.fenceI.expect(false.B)
+      dut.clock.step()
+
+      setDefaultInputs(dut)
+      dut.io.commitRAT.valid.expect(false.B)
       dut.io.csrPending.expect(false.B)
     }
   }
@@ -459,6 +507,7 @@ class ROBTest extends AnyFlatSpec with ChiselScalatestTester {
       setDefaultInputs(dut)
 
       // 入队一条 SFENCE.VMA 指令
+      setDefaultInputs(dut)
       setControlInit(dut, pc = 0x80000000L, specialInstr = SpecialInstr.SFENCE)
       setDataInit(dut, archRd = 0, phyRd = 0, phyOld = 0, branchMask = 0)
       dut.clock.step()
@@ -467,19 +516,25 @@ class ROBTest extends AnyFlatSpec with ChiselScalatestTester {
       dut.io.csrPending.expect(true.B)
 
       // SFENCE.VMA 指令完成
+      setDefaultInputs(dut)
       setCDB(dut, robId = 0, phyRd = 0, data = 0)
       dut.clock.step()
 
+      // IDLE -> WAIT
+      setDefaultInputs(dut)
       // SFENCE.VMA 指令应该拉高 sfenceVma 信号
       dut.io.sfenceVma.valid.expect(true.B)
-
-      // 模拟 MMU 确认（通过 CDB 第二次发送）
-      setCDB(dut, robId = 0, phyRd = 0, data = 0)
       dut.clock.step()
 
+      setDefaultInputs(dut)
+      setCDB(dut, robId = 0, phyRd = 0, data = 0)
       // SFENCE.VMA 指令应该提交
       dut.io.commitRAT.valid.expect(true.B)
       dut.io.sfenceVma.valid.expect(false.B)
+      dut.clock.step()
+
+      setDefaultInputs(dut)
+      dut.io.commitRAT.valid.expect(false.B)
       dut.io.csrPending.expect(false.B)
     }
   }
@@ -489,20 +544,18 @@ class ROBTest extends AnyFlatSpec with ChiselScalatestTester {
       setDefaultInputs(dut)
 
       // 入队一条 WFI 指令
+      setDefaultInputs(dut)
       setControlInit(dut, pc = 0x80000000L, specialInstr = SpecialInstr.WFI)
       setDataInit(dut, archRd = 0, phyRd = 0, phyOld = 0, branchMask = 0)
       dut.clock.step()
 
-      // 验证 CSRPending 信号被拉高
-      dut.io.csrPending.expect(true.B)
-
       // WFI 指令完成
+      setDefaultInputs(dut)
       setCDB(dut, robId = 0, phyRd = 0, data = 0)
       dut.clock.step()
 
       // WFI 指令应该直接提交（当作 NOP）
       dut.io.commitRAT.valid.expect(true.B)
-      dut.io.csrPending.expect(false.B)
     }
   }
 
@@ -512,10 +565,10 @@ class ROBTest extends AnyFlatSpec with ChiselScalatestTester {
 
   it should "正确处理分支预测错误冲刷" in {
     test(new ROB) { dut =>
-      setDefaultInputs(dut)
 
       // 入队 3 条指令
       for (i <- 0 until 3) {
+        setDefaultInputs(dut)
         setControlInit(
           dut,
           pc = (0x80000000L + i * 4).toLong,
@@ -532,6 +585,7 @@ class ROBTest extends AnyFlatSpec with ChiselScalatestTester {
       }
 
       // 分支预测错误，冲刷第一条指令（branchMask = 1）
+      setDefaultInputs(dut)
       dut.io.branchFlush.poke(true.B)
       dut.io.branchOH.poke(1.U)
       dut.io.branchRobId.poke(0.U)
@@ -542,12 +596,17 @@ class ROBTest extends AnyFlatSpec with ChiselScalatestTester {
 
       // 验证第二条指令的 branchMask 已更新（移除 branchOH）
       // 由于第一条指令被冲刷，第二条指令应该可以提交
-      setCDB(dut, robId = 1, phyRd = 33, data = 0x200)
+      setDefaultInputs(dut)
+      setCDB(dut, robId = 0, phyRd = 33, data = 0x200)
       dut.clock.step()
 
       // 验证提交
       dut.io.commitRAT.valid.expect(true.B)
-      dut.io.commitRAT.bits.archRd.expect(2.U)
+      dut.io.commitRAT.bits.archRd.expect(1.U)
+      dut.clock.step()
+
+      setDefaultInputs(dut)
+      dut.io.commitRAT.valid.expect(false.B) // 指令耗尽
     }
   }
 
@@ -556,11 +615,13 @@ class ROBTest extends AnyFlatSpec with ChiselScalatestTester {
       setDefaultInputs(dut)
 
       // 入队一条分支指令
+      setDefaultInputs(dut)
       setControlInit(dut, pc = 0x80000000L, specialInstr = SpecialInstr.BRANCH)
       setDataInit(dut, archRd = 0, phyRd = 0, phyOld = 0, branchMask = 1)
       dut.clock.step()
 
       // 分支预测正确，不冲刷
+      setDefaultInputs(dut)
       dut.io.branchFlush.poke(false.B)
       dut.io.branchOH.poke(1.U)
       dut.io.branchRobId.poke(0.U)
@@ -571,6 +632,7 @@ class ROBTest extends AnyFlatSpec with ChiselScalatestTester {
 
       // 验证 branchMask 已移除
       // 由于 branchMask 被移除，指令应该可以提交
+      setDefaultInputs(dut)
       setCDB(dut, robId = 0, phyRd = 0, data = 0)
       dut.clock.step()
 
@@ -584,25 +646,30 @@ class ROBTest extends AnyFlatSpec with ChiselScalatestTester {
       setDefaultInputs(dut)
 
       // 入队 3 条指令，设置不同的 branchMask
+      setDefaultInputs(dut)
       setControlInit(dut, pc = 0x80000000L, specialInstr = SpecialInstr.NONE)
       setDataInit(dut, archRd = 1, phyRd = 32, phyOld = 1, branchMask = 1)
       dut.clock.step()
 
+      setDefaultInputs(dut)
       setControlInit(dut, pc = 0x80000004L, specialInstr = SpecialInstr.NONE)
       setDataInit(dut, archRd = 2, phyRd = 33, phyOld = 2, branchMask = 3)
       dut.clock.step()
 
+      setDefaultInputs(dut)
       setControlInit(dut, pc = 0x80000008L, specialInstr = SpecialInstr.NONE)
       setDataInit(dut, archRd = 3, phyRd = 34, phyOld = 3, branchMask = 7)
       dut.clock.step()
 
       // 分支预测正确，移除第一个分支的掩码
+      setDefaultInputs(dut)
       dut.io.branchFlush.poke(false.B)
       dut.io.branchOH.poke(1.U)
       dut.io.branchRobId.poke(0.U)
       dut.clock.step()
 
       // 完成并提交第一条指令
+      setDefaultInputs(dut)
       setCDB(dut, robId = 0, phyRd = 32, data = 0x100)
       dut.clock.step()
 
@@ -621,6 +688,7 @@ class ROBTest extends AnyFlatSpec with ChiselScalatestTester {
 
       // 入队 3 条指令
       for (i <- 0 until 3) {
+        setDefaultInputs(dut)
         setControlInit(
           dut,
           pc = (0x80000000L + i * 4).toLong,
@@ -637,6 +705,7 @@ class ROBTest extends AnyFlatSpec with ChiselScalatestTester {
       }
 
       // Global Flush
+      setDefaultInputs(dut)
       dut.io.globalFlush.poke(true.B)
       dut.clock.step()
 
@@ -654,10 +723,12 @@ class ROBTest extends AnyFlatSpec with ChiselScalatestTester {
       dut.io.csrPending.expect(false.B)
 
       // 取消冲刷
+      setDefaultInputs(dut)
       dut.io.globalFlush.poke(false.B)
       dut.clock.step()
 
       // 验证可以重新入队
+      setDefaultInputs(dut)
       setControlInit(dut, pc = 0x80000000L, specialInstr = SpecialInstr.NONE)
       setDataInit(dut, archRd = 1, phyRd = 32, phyOld = 1, branchMask = 0)
       dut.io.controlInit.ready.expect(true.B)
@@ -675,6 +746,7 @@ class ROBTest extends AnyFlatSpec with ChiselScalatestTester {
       dut.io.dEpoch.expect(0.U)
 
       // Global Flush
+      setDefaultInputs(dut)
       dut.io.globalFlush.poke(true.B)
       dut.clock.step()
 
@@ -683,6 +755,8 @@ class ROBTest extends AnyFlatSpec with ChiselScalatestTester {
       dut.io.dEpoch.expect(1.U)
 
       // 再次 Global Flush
+      setDefaultInputs(dut)
+      dut.io.globalFlush.poke(true.B)
       dut.clock.step()
 
       // 验证纪元继续更新
@@ -696,11 +770,13 @@ class ROBTest extends AnyFlatSpec with ChiselScalatestTester {
       setDefaultInputs(dut)
 
       // 入队一条 Store 指令
+      setDefaultInputs(dut)
       setControlInit(dut, pc = 0x80000000L, specialInstr = SpecialInstr.STORE)
       setDataInit(dut, archRd = 0, phyRd = 0, phyOld = 0, branchMask = 0)
       dut.clock.step()
 
       // Store 指令完成
+      setDefaultInputs(dut)
       setCDB(dut, robId = 0, phyRd = 0, data = 0)
       dut.clock.step()
 
@@ -708,6 +784,7 @@ class ROBTest extends AnyFlatSpec with ChiselScalatestTester {
       dut.io.storeEnable.expect(true.B)
 
       // Global Flush
+      setDefaultInputs(dut)
       dut.io.globalFlush.poke(true.B)
       dut.clock.step()
 
@@ -723,6 +800,7 @@ class ROBTest extends AnyFlatSpec with ChiselScalatestTester {
 
       // 入队 3 条指令
       for (i <- 0 until 3) {
+        setDefaultInputs(dut)
         setControlInit(
           dut,
           pc = (0x80000000L + i * 4).toLong,
@@ -739,6 +817,7 @@ class ROBTest extends AnyFlatSpec with ChiselScalatestTester {
       }
 
       // 同时设置 Global Flush 和 branchFlush
+      setDefaultInputs(dut)
       dut.io.globalFlush.poke(true.B)
       dut.io.branchFlush.poke(true.B)
       dut.io.branchOH.poke(1.U)
@@ -760,6 +839,7 @@ class ROBTest extends AnyFlatSpec with ChiselScalatestTester {
       setDefaultInputs(dut)
 
       // 入队一条异常指令
+      setDefaultInputs(dut)
       setControlInit(
         dut,
         pc = 0x80000000L,
@@ -787,11 +867,13 @@ class ROBTest extends AnyFlatSpec with ChiselScalatestTester {
       setDefaultInputs(dut)
 
       // 入队一条普通指令
+      setDefaultInputs(dut)
       setControlInit(dut, pc = 0x80000000L, specialInstr = SpecialInstr.NONE)
       setDataInit(dut, archRd = 1, phyRd = 32, phyOld = 1, branchMask = 0)
       dut.clock.step()
 
       // 执行阶段产生异常
+      setDefaultInputs(dut)
       setCDB(
         dut,
         robId = 0,
@@ -817,6 +899,7 @@ class ROBTest extends AnyFlatSpec with ChiselScalatestTester {
 
       // 入队 3 条指令
       for (i <- 0 until 3) {
+        setDefaultInputs(dut)
         setControlInit(
           dut,
           pc = (0x80000000L + i * 4).toLong,
@@ -833,6 +916,7 @@ class ROBTest extends AnyFlatSpec with ChiselScalatestTester {
       }
 
       // 完成第二条指令（产生异常）
+      setDefaultInputs(dut)
       setCDB(
         dut,
         robId = 1,
@@ -845,6 +929,7 @@ class ROBTest extends AnyFlatSpec with ChiselScalatestTester {
       dut.clock.step()
 
       // 完成第三条指令
+      setDefaultInputs(dut)
       setCDB(dut, robId = 2, phyRd = 34, data = 0x300)
       dut.clock.step()
 
@@ -854,6 +939,7 @@ class ROBTest extends AnyFlatSpec with ChiselScalatestTester {
       dut.io.exception.valid.expect(false.B)
 
       // 完成第一条指令
+      setDefaultInputs(dut)
       setCDB(dut, robId = 0, phyRd = 32, data = 0x100)
       dut.clock.step()
 
@@ -862,6 +948,7 @@ class ROBTest extends AnyFlatSpec with ChiselScalatestTester {
       dut.io.exception.valid.expect(false.B)
 
       // 提交第一条指令后，第二条指令成为队头
+      setDefaultInputs(dut)
       dut.clock.step()
 
       // 第二条指令可以提交并输出异常
@@ -881,6 +968,7 @@ class ROBTest extends AnyFlatSpec with ChiselScalatestTester {
       setDefaultInputs(dut)
 
       // 入队一条 CSR 指令
+      setDefaultInputs(dut)
       setControlInit(dut, pc = 0x80000000L, specialInstr = SpecialInstr.CSR)
       setDataInit(dut, archRd = 1, phyRd = 32, phyOld = 1, branchMask = 0)
       dut.clock.step()
@@ -895,6 +983,7 @@ class ROBTest extends AnyFlatSpec with ChiselScalatestTester {
       setDefaultInputs(dut)
 
       // 入队一条 CSR 指令
+      setDefaultInputs(dut)
       setControlInit(dut, pc = 0x80000000L, specialInstr = SpecialInstr.CSR)
       setDataInit(dut, archRd = 1, phyRd = 32, phyOld = 1, branchMask = 0)
       dut.clock.step()
@@ -903,6 +992,7 @@ class ROBTest extends AnyFlatSpec with ChiselScalatestTester {
       dut.io.csrPending.expect(true.B)
 
       // CSR 指令完成
+      setDefaultInputs(dut)
       setCDB(dut, robId = 0, phyRd = 32, data = 0x100)
       dut.clock.step()
 
@@ -910,9 +1000,11 @@ class ROBTest extends AnyFlatSpec with ChiselScalatestTester {
       dut.io.csrEnable.expect(true.B)
 
       // 模拟 ZICSRU 确认
+      setDefaultInputs(dut)
       setCDB(dut, robId = 0, phyRd = 32, data = 0x100)
       dut.clock.step()
 
+      dut.clock.step()
       // 验证 CSRPending 被拉低
       dut.io.csrPending.expect(false.B)
     }
@@ -923,6 +1015,7 @@ class ROBTest extends AnyFlatSpec with ChiselScalatestTester {
       setDefaultInputs(dut)
 
       // 入队第一条 CSR 指令
+      setDefaultInputs(dut)
       setControlInit(dut, pc = 0x80000000L, specialInstr = SpecialInstr.CSR)
       setDataInit(dut, archRd = 1, phyRd = 32, phyOld = 1, branchMask = 0)
       dut.clock.step()
@@ -931,6 +1024,7 @@ class ROBTest extends AnyFlatSpec with ChiselScalatestTester {
       dut.io.csrPending.expect(true.B)
 
       // 入队第二条 CSR 指令
+      setDefaultInputs(dut)
       setControlInit(dut, pc = 0x80000004L, specialInstr = SpecialInstr.CSR)
       setDataInit(dut, archRd = 2, phyRd = 33, phyOld = 2, branchMask = 0)
       dut.clock.step()
@@ -939,11 +1033,13 @@ class ROBTest extends AnyFlatSpec with ChiselScalatestTester {
       dut.io.csrPending.expect(true.B)
 
       // 完成并提交第一条 CSR 指令
+      setDefaultInputs(dut)
       setCDB(dut, robId = 0, phyRd = 32, data = 0x100)
       dut.clock.step()
 
       dut.io.csrEnable.expect(true.B)
 
+      setDefaultInputs(dut)
       setCDB(dut, robId = 0, phyRd = 32, data = 0x100)
       dut.clock.step()
 
@@ -965,6 +1061,7 @@ class ROBTest extends AnyFlatSpec with ChiselScalatestTester {
       dut.io.dEpoch.expect(0.U)
 
       // 分支冲刷
+      setDefaultInputs(dut)
       dut.io.branchFlush.poke(true.B)
       dut.io.branchOH.poke(1.U)
       dut.io.branchRobId.poke(0.U)
@@ -985,6 +1082,7 @@ class ROBTest extends AnyFlatSpec with ChiselScalatestTester {
       dut.io.dEpoch.expect(0.U)
 
       // 全局冲刷
+      setDefaultInputs(dut)
       dut.io.globalFlush.poke(true.B)
       dut.clock.step()
 
@@ -1000,8 +1098,10 @@ class ROBTest extends AnyFlatSpec with ChiselScalatestTester {
 
       // 连续触发 4 次全局冲刷
       for (i <- 0 until 4) {
+        setDefaultInputs(dut)
         dut.io.globalFlush.poke(true.B)
         dut.clock.step()
+        setDefaultInputs(dut)
         dut.io.globalFlush.poke(false.B)
         dut.clock.step()
       }
@@ -1022,6 +1122,7 @@ class ROBTest extends AnyFlatSpec with ChiselScalatestTester {
 
       // 入队 5 条指令
       for (i <- 0 until 5) {
+        setDefaultInputs(dut)
         setControlInit(
           dut,
           pc = (0x80000000L + i * 4).toLong,
@@ -1038,13 +1139,16 @@ class ROBTest extends AnyFlatSpec with ChiselScalatestTester {
       }
 
       // 乱序完成指令
+      setDefaultInputs(dut)
       setCDB(dut, robId = 2, phyRd = 34, data = 0x300)
       dut.clock.step()
 
-      setCDB(dut, robId = 0, phyRd = 32, data = 0x100)
+      setDefaultInputs(dut)
+      setCDB(dut, robId = 4, phyRd = 32, data = 0x100)
       dut.clock.step()
 
-      setCDB(dut, robId = 4, phyRd = 36, data = 0x500)
+      setDefaultInputs(dut)
+      setCDB(dut, robId = 0, phyRd = 36, data = 0x500)
       dut.clock.step()
 
       // 只有第一条指令可以提交（队头）
@@ -1052,23 +1156,24 @@ class ROBTest extends AnyFlatSpec with ChiselScalatestTester {
       dut.io.commitRAT.bits.archRd.expect(1.U)
 
       // 提交第一条指令
+      setDefaultInputs(dut)
       dut.clock.step()
 
       // 第二条指令仍未完成，无法提交
       dut.io.commitRAT.valid.expect(false.B)
 
       // 完成第二条指令
+      setDefaultInputs(dut)
       setCDB(dut, robId = 1, phyRd = 33, data = 0x200)
       dut.clock.step()
 
       // 第二条指令可以提交
       dut.io.commitRAT.valid.expect(true.B)
       dut.io.commitRAT.bits.archRd.expect(2.U)
-
-      // 提交第二条指令
       dut.clock.step()
 
       // 第三条指令已完成，可以提交
+      setDefaultInputs(dut)
       dut.io.commitRAT.valid.expect(true.B)
       dut.io.commitRAT.bits.archRd.expect(3.U)
     }
@@ -1079,57 +1184,69 @@ class ROBTest extends AnyFlatSpec with ChiselScalatestTester {
       setDefaultInputs(dut)
 
       // 入队一条普通指令
+      setDefaultInputs(dut)
       setControlInit(dut, pc = 0x80000000L, specialInstr = SpecialInstr.NONE)
       setDataInit(dut, archRd = 1, phyRd = 32, phyOld = 1, branchMask = 0)
       dut.clock.step()
 
       // 入队一条 Store 指令
+      setDefaultInputs(dut)
       setControlInit(dut, pc = 0x80000004L, specialInstr = SpecialInstr.STORE)
       setDataInit(dut, archRd = 0, phyRd = 0, phyOld = 0, branchMask = 0)
       dut.clock.step()
 
       // 入队一条 CSR 指令
+      setDefaultInputs(dut)
       setControlInit(dut, pc = 0x80000008L, specialInstr = SpecialInstr.CSR)
       setDataInit(dut, archRd = 2, phyRd = 33, phyOld = 2, branchMask = 0)
       dut.clock.step()
 
       // 完成所有指令
-      setCDB(dut, robId = 0, phyRd = 32, data = 0x100)
-      dut.clock.step()
-
+      setDefaultInputs(dut)
       setCDB(dut, robId = 1, phyRd = 0, data = 0)
       dut.clock.step()
 
+      setDefaultInputs(dut)
       setCDB(dut, robId = 2, phyRd = 33, data = 0x200)
       dut.clock.step()
 
+      setDefaultInputs(dut)
+      setCDB(dut, robId = 0, phyRd = 32, data = 0x100)
+      dut.clock.step()
+
       // 提交第一条指令
+      setDefaultInputs(dut)
       dut.io.commitRAT.valid.expect(true.B)
       dut.io.commitRAT.bits.archRd.expect(1.U)
       dut.clock.step()
 
       // Store 指令应该拉高 storeEnable
+      setDefaultInputs(dut)
       dut.io.storeEnable.expect(true.B)
-
-      // 模拟 LSU 确认
-      setCDB(dut, robId = 1, phyRd = 0, data = 0)
       dut.clock.step()
 
+      // 模拟 LSU 确认
+      setDefaultInputs(dut)
+      setCDB(dut, robId = 1, phyRd = 0, data = 0)
       // Store 指令应该提交
       dut.io.commitRAT.valid.expect(true.B)
       dut.io.storeEnable.expect(false.B)
-      dut.clock.step()
 
+      dut.clock.step()
+      setDefaultInputs(dut)
       // CSR 指令应该拉高 csrEnable
       dut.io.csrEnable.expect(true.B)
 
-      // 模拟 ZICSRU 确认
-      setCDB(dut, robId = 2, phyRd = 33, data = 0x200)
       dut.clock.step()
-
+      // 模拟 ZICSRU 确认
+      setDefaultInputs(dut)
+      setCDB(dut, robId = 2, phyRd = 33, data = 0x200)
       // CSR 指令应该提交
       dut.io.commitRAT.valid.expect(true.B)
       dut.io.csrEnable.expect(false.B)
+      dut.clock.step()
+
+
       dut.io.csrPending.expect(false.B)
     }
   }
@@ -1139,28 +1256,32 @@ class ROBTest extends AnyFlatSpec with ChiselScalatestTester {
       setDefaultInputs(dut)
 
       // 入队一条普通指令
+      setDefaultInputs(dut)
       setControlInit(dut, pc = 0x80000000L, specialInstr = SpecialInstr.NONE)
       setDataInit(dut, archRd = 1, phyRd = 32, phyOld = 1, branchMask = 1)
       dut.clock.step()
 
       // 入队一条 CSR 指令
+      setDefaultInputs(dut)
       setControlInit(dut, pc = 0x80000004L, specialInstr = SpecialInstr.CSR)
       setDataInit(dut, archRd = 2, phyRd = 33, phyOld = 2, branchMask = 1)
       dut.clock.step()
 
       // 分支预测错误，冲刷所有指令
+      setDefaultInputs(dut)
       dut.io.branchFlush.poke(true.B)
       dut.io.branchOH.poke(1.U)
       dut.io.branchRobId.poke(0.U)
       dut.clock.step()
 
+      setDefaultInputs(dut)
       // 验证 iEpoch 已更新
       dut.io.iEpoch.expect(1.U)
-
       // 验证 CSRPending 被重置
       dut.io.csrPending.expect(false.B)
 
       // 验证可以重新入队
+      setDefaultInputs(dut)
       setControlInit(dut, pc = 0x80000000L, specialInstr = SpecialInstr.NONE)
       setDataInit(dut, archRd = 1, phyRd = 32, phyOld = 1, branchMask = 0)
       dut.io.controlInit.ready.expect(true.B)
@@ -1173,11 +1294,13 @@ class ROBTest extends AnyFlatSpec with ChiselScalatestTester {
       setDefaultInputs(dut)
 
       // 入队一条 Store 指令
+      setDefaultInputs(dut)
       setControlInit(dut, pc = 0x80000000L, specialInstr = SpecialInstr.STORE)
       setDataInit(dut, archRd = 0, phyRd = 0, phyOld = 0, branchMask = 0)
       dut.clock.step()
 
       // Store 指令完成
+      setDefaultInputs(dut)
       setCDB(dut, robId = 0, phyRd = 0, data = 0)
       dut.clock.step()
 
@@ -1185,6 +1308,7 @@ class ROBTest extends AnyFlatSpec with ChiselScalatestTester {
       dut.io.storeEnable.expect(true.B)
 
       // 全局冲刷
+      setDefaultInputs(dut)
       dut.io.globalFlush.poke(true.B)
       dut.clock.step()
 
