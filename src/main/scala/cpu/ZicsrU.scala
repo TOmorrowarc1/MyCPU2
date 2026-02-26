@@ -29,6 +29,7 @@ class ZicsrU extends Module with CPUConfig {
     }))
 
     // 分支冲刷信号
+    val globalFlush = Input(Bool())
     val branchFlush = Input(Bool())
     val branchOH = Input(SnapshotMask)
   })
@@ -176,10 +177,14 @@ class ZicsrU extends Module with CPUConfig {
   io.cdb.bits.exception := exceptionReg
 
   // 冲刷处理
-  when(
-    (state =/= ZicsrState.IDLE) && (io.branchOH & instructionReg.branchMask) =/= 0.U
-  ) {
-    when(needFlush) {
+  when(io.globalFlush) {
+    state := ZicsrState.IDLE
+    instructionReg := 0.U.asTypeOf(instructionReg)
+    csrRdataReg := 0.U
+    csrWdataReg := 0.U
+    exceptionReg := defaultException
+  }.elsewhen((io.branchOH & instructionReg.branchMask) =/= 0.U) {
+    when(io.branchFlush) {
       state := ZicsrState.IDLE
       instructionReg := 0.U.asTypeOf(instructionReg)
       csrRdataReg := 0.U

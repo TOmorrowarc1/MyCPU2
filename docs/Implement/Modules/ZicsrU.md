@@ -56,6 +56,7 @@ ZicsrU 通过总线 CDB 接收操作数就绪信号：
 | ------------- | ----------- | ----------------------------- |
 | `CSRReadData` | `DataW`     | 从 CSRsUnit 读取的 CSR 当前值 |
 | `exception`   | `Exception` | CSR 读取/写入异常信息         |
+| `globalFlush` | `Bool`       | 来自 CSRsUnit 的全局冲刷信号 |
 
 #### 2.1.4 来自重排序缓冲区（ROB）
 
@@ -145,6 +146,7 @@ class ZicsrU extends Module with CPUConfig {
     val CDB = Decoupled(new CDBMessage)
 
     // 分支冲刷信号
+    val globalFlush = Input(Bool())
     val branchFlush = Input(Bool())
     val branchOH = Input(SnapshotMask)
   })
@@ -236,7 +238,7 @@ val boardcast = WireDefault(false.B) // 广播阶段，向 CDB 广播结果
 val needFlush = WireDefault(false.B) // 可能被冲刷
 
 // 计算使能
-needFlush := io.branchFlush
+needFlush := io.branchFlush || io.globalFlush
 io.zicsrReq.ready := !needFlush && state === ZicsrState.IDLE
 canRead := !needFlush && state === ZicsrState.WAIT_READ && instructionReg.data.src1Ready
 canWrite := !needFlush && state === ZicsrState.WAIT_HEAD && io.commitReady
