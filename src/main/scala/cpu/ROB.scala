@@ -167,6 +167,9 @@ class ROB extends Module with CPUConfig {
   io.sfenceVma.rs1 := 0.U
   io.sfenceVma.rs2 := 0.U
   io.commitRAT.valid := false.B
+  io.commitRAT.bits.archRd := 0.U
+  io.commitRAT.bits.phyRd := 0.U
+  io.commitRAT.bits.preRd := 0.U
   io.exception.valid := false.B
   io.exception.cause := 0.U
   io.exception.tval := 0.U
