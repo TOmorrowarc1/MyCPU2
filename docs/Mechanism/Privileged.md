@@ -10,7 +10,7 @@
 
 #### 1.2 特权级 (Privilege Levels)
 *   系统支持三个核心特权级：**M (Machine) > S (Supervisor) > U (User)**。
-    > M 模式是所有实现必须具备的唯一特权级。
+    > M 模式是唯一一个所有实现必须具备的特权级。
 *   **设计目的**：实现**资源隔离**。高特权级可以访问低特权级的所有硬件资源并负责捕获和处理低特权级无法处理的异常（e.g. 访问 CSRs，执行特权指令），而低权限模式无法感知、使用高权限的 CSRs 与指令，从而保证了系统的安全性与稳定性。
     
 #### 1.3 状态机
@@ -18,9 +18,8 @@ Privileged ISA 向外抽象为一个复杂的有限状态机：
 *   **状态 (States)**：当前 **Privilege Mode** 和所有 **CSRs** 的值。
 *   **事件 (Events)**：状态机发生迁移的原因。
     *   **Trap**：引发控制流转移的异常事件。
-        *   *Exception (同步)*：由当前执行的指令触发（e.g. 非法指令、地址对齐错误、ecall）。
-        *   *Interrupt (异步)*：由外部异步信号触发（e.g. 定时器、外部中断源）。
-        *   *Vertical Trap* 与 *Horizontal Trap*：由是否涉及提权区分。
+        *   *Exception (同步)* 与 *Interrupt (异步)*：由当前执行的指令触发（e.g. 非法指令、地址对齐错误、ecall）vs 由外部异步信号触发（e.g. 定时器、外部中断源）。
+        *   *Vertical Trap* 与 *Horizontal Trap*：涉及提权 vs 不涉及
     *   **指令执行**：特定特权指令（e.g. mret, sret）或 Ziscr 扩展。
 *   **迁移协议**：状态机迁移方式。
     1.  **静态规则**: CSRs 及其 Fields 固有的读写行为（e.g. Fields 的 WARL、WLRL、WPRI 属性）。
@@ -329,8 +328,7 @@ Trap 是硬件 hart 停止当前指令流，跳转到特定特权级处理程序
 *   **地址**: `0x302`
 *   **Value (Bits 31:0)**:
     *   *特性*: **WARL**.
-    *   *含义*: 每一位对应一个同步异常代码（如 Bit 12 对应 Instruction Page Fault）。置 1 表示委托给 S-mode。
-    *   
+    *   *含义*: 每一位对应一个同步异常代码（如 Bit 12 对应 Instruction Page Fault）。置 1 表示委托给 S-mode。   
 
 ### 4.3 状态迁移协议：S-mode 的特殊规则
 
