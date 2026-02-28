@@ -195,21 +195,41 @@
     *   RAT 更新信息：`{commitArchRd, commitPhyRd, commitOldRd}`。
 
 ### 3.3 CSRsUnit
-*   **职责**：物理 CSR 寄存器堆，实现 CSR 相关特权级逻辑。
+*   **职责**：物理 CSR 寄存器堆，实现 CSR 相关特权级逻辑，是 CPU 特权级管理的核心模块。
+    *   **CSR 读写检查**：对 CSR 访问进行权限检查、字段规则验证和副作用处理
+    *   **Trap 处理**：实现 M-mode 和 S-mode 的 Trap 进入与返回机制（包括 mret、sret 指令处理）
+    *   **集中式状态管理**：统一管理所有 CSR 寄存器的更新，避免在多个模块中分散更新
+    *   **特权级控制**：向 Fetcher 和 Decoder 提供当前特权级信息
+    *   **内存访问控制**：提供 PMP 配置和 satp 配置给 LSU 进行权限检查和地址翻译
+    *   **全局控制**：产生全局冲刷信号，管理异常和中断处理
 *   **输入**：
-    *   来自 ZICSRU 的读请求（组合逻辑返回结果）。
-    *   来自 ZICSRU 的 写请求（组合逻辑返回是否出现异常）。
-    *   来自 ROB 的 Trap 信号（`exception` 与特殊指令信号）。
-*   **逻辑**：
-    *   维护 `mstatus`, `mie`, `satp` 等关键寄存器。
-    *   **原子更新**：只有在收到 ROB 的 Commit 信号时才真正改写寄存器值。
-    *   **特权检查**：配合 Decoder/LSU 提供当前的权限位（PrivMode）和地址翻译控制位（TVM, MPRV）。
+    *   **来自 ZICSRU 的读请求**：`{csrAddr, privMode}`。
+    *   **来自 ZICSRU 的写请求**：`{csrAddr, privMode, data}`。
+    *   **来自 ROB 的 Commit & Trap 信号**：`{exception(valid, cause, tval), pc, isCSR, mret, sret}`，用于异常处理，返回指令处理和 Zicsr 指令处理（触发全局更新）。
+*   **逻辑简述**：
+    *   **CSR 读写检查逻辑**：
+        *   **地址权限判定**：在 Decoder 中完成，CSR 剩余检查集中于地址对应寄存器存在与否以及 PMPRegs L 位类似的检查。
+        *   **字段读写规则**：实现 WPRI（Write Preserve, Read Ignore）、WLRL（Write/Read Only Legal Values）、WARL（Write Any Values, Read Legal Values）、Read-Only 四种字段类型的读写规则。
+        *   **CSR Modulation**：处理 CSR 之间的同步映射关系，如 sstatus 与 mstatus 的同步、sie 与 mie 的同步。
+        > Modulation 不具备递归的二级副作用，需确保每次 Modulation 只影响一级 CSR。
+    *   **Trap-handler 状态转移逻辑**：
+        *   **异常与中断判定**：根据 ROB 输入的 `exception` 信号判定是否发生异常，提取异常原因（cause）和相关值（tval）。同时根据外部中断输入和当前状态判定是否发生中断，注意异常优先级高于中断。
+        *   **M-mode Trap 进入**：保存 PC（异常时为当前指令，中断时为下一条指令）到 mepc，更新 mcause 和 mtval，保存 mstatus 状态（MPIE=MIE, MPP=当前特权级），修改 mstatus（MIE=0），切换特权级到 M-mode，跳转到 mtvec。
+        *   **MRET 返回**：还原 mstatus（MIE=MPIE），还原特权级（当前特权级=MPP），清理 mstatus（MPIE=1, MPP=U），跳转到 mepc。
+        *   **S-mode Trap 进入**：检查委托条件（当前特权级 < M 且 medeleg/mideleg[cause]==1），保存 PC 到 sepc，更新 scause 和 stval，保存 sstatus 状态（SPIE=SIE, SPP=当前特权级），修改 sstatus（SIE=0），切换特权级到 S-mode，跳转到 stvec。
+        *   **SRET 返回**：还原 sstatus（SIE=SPIE），还原特权级（当前特权级=SPP），清理 sstatus（SPIE=1, SPP=U），跳转到 sepc。
+    *   **集中式 CSR 更新逻辑**：
+        *   **CSR 寄存器维护**：维护 mstatus, mie, mepc, mcause, mtval, mtvec, mscratch, mideleg, medeleg, mip（M-mode）和 sstatus, sie, sepc, scause, stval, stvec, sscratch, satp（S-mode）等关键寄存器
+        *   **避免分散式更新**：使用 MuxLookup 集中处理多个更新源，避免在多个 when 块中分散更新 CSR。更新优先级为 异常 > 中断 > CSR 指令。
+    *   **特权检查**：配合 Decoder/LSU 提供当前的权限位（PrivMode），PMP 相关控制寄存器，地址翻译控制位（TVM, MPRV, stap）。
 *   **输出**：
-    *   向 ZICSRU 提供 CSR 访问结果。
-    *   向 Fetcher 提供当前 privMode。
-    *   向 Decoder 暴露当前 privMode。
-    *   提供全局 flush 信号：`globalFlush` 与 `globalFlushPC`。  
-    *   提供内存相关控制信息：`pmp` 配置，`satp` 配置。
+    *   **向 ZICSRU 提供 CSR 访问结果**：读取为 `{data, exception}`，包括读取的 CSR 数据和异常信息；写入为 `{exception}`，表示写入结果的异常信息。
+    *   **向 Fetcher 提供当前 privMode**：用于指令取指时的特权级检查
+    *   **向 Decoder 暴露当前 privMode**：用于指令解码时的特权级检查
+    *   **提供全局 flush 信号**：`{globalFlush(valid, pc)}`，用于异常，中断处理和 CSR/mret/sret 指令提交时的流水线冲刷。
+    *   **提供内存相关控制信息**：`{pmp 配置}`，用于内存系统的权限检查。
+*   **实现要点**：
+    *   **集中式状态管理**：整个 Unit 分为三个阶段，读取输入，计算，抉择 + 更新 + 输出，避免在多个 when 语句中分散处理 CSR 更新逻辑；分别计算由异常产生的结果，由中断产生的结果与 CSR 指令读写的结果，再**使用 MuxLookup** 选择更新源。
 
 ## 4. 内存模块
 
