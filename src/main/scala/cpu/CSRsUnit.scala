@@ -182,11 +182,11 @@ class CSRsUnit extends Module with CPUConfig {
         CSRField("WPRI", 0, 0, WPRI)
       )),
       CSRDesc(0x305, "mtvec", phys.mMode.mtvec, Seq(
-        CSRField("BASE", 31, 2, WARL((old, raw) => Cat(raw(31, 2), 0.U(2.W)))),
-        CSRField("MODE", 1, 0, WARL((old, raw) => Mux(raw > 1.U, 0.U, raw)))
+        CSRField("BASE", 31, 2, WARL((old, raw) => raw & "hFFFF_FFFC".U)),
+        CSRField("MODE", 1, 0, RW)
       )),
       CSRDesc(0x341, "mepc", phys.mMode.mepc, Seq(
-        CSRField("BASE", 31, 0, WARL((old, raw) => Cat(raw(31, 2), 0.U(2.W))))
+        CSRField("BASE", 31, 0, WARL((old, raw) => raw & "hFFFF_FFFC".U))
       )),
       CSRDesc(0x342, "mcause", phys.mMode.mcause, Seq(
         CSRField("Interrupt", 31, 31, RO),
@@ -257,20 +257,20 @@ class CSRsUnit extends Module with CPUConfig {
         CSRField("WPRI", 0, 0, WPRI)
       )),
       CSRDesc(0x180, "satp", phys.sMode.satp, Seq(
-        CSRField("MODE", 31, 31, WARL((old, raw) => Mux(raw > 1.U, 0.U, raw))),
+        CSRField("MODE", 31, 31, RW),
         CSRField("ASID", 30, 22, RW),  // ASID 不支持
         CSRField("PPN", 21, 0, RW)
       )),
       CSRDesc(0x105, "stvec", phys.sMode.stvec, Seq(
-        CSRField("BASE", 31, 2, WARL((old, raw) => Cat(raw(31, 2), 0.U(2.W)))),
-        CSRField("MODE", 1, 0, WARL((old, raw) => Mux(raw > 1.U, 0.U, raw)))
+        CSRField("BASE", 31, 2, WARL((old, raw) => raw & "hFFFF_FFFC".U)),
+        CSRField("MODE", 1, 0, RW)
       )),
       CSRDesc(0x141, "sepc", phys.sMode.sepc, Seq(
-        CSRField("Value", 31, 0, WARL((old, raw) => Cat(raw(31, 2), 0.U(2.W))))
+        CSRField("Value", 31, 0, WARL((old, raw) => raw & "hFFFF_FFFC".U))
       )),
       CSRDesc(0x142, "scause", phys.sMode.scause, Seq(
-        CSRField("Interrupt", 31, 31, WARL((old, raw) => Mux(raw > 1.U, 0.U, raw))),
-        CSRField("Code", 30, 0, WARL((old, raw) => Mux(raw >= 32.U, 0.U, raw)))
+        CSRField("Interrupt", 31, 31, RW),
+        CSRField("Code", 30, 0, WARL((old, raw) => raw(4, 0)))
       )),
       CSRDesc(0x143, "stval", phys.sMode.stval, Seq(
         CSRField("Value", 31, 0, RW)
@@ -281,9 +281,9 @@ class CSRsUnit extends Module with CPUConfig {
     ) ++ (0 until 16).map { i =>
       CSRDesc(0x3A0 + i, s"pmpcfg$i", phys.pmp.pmpcfg(i), Seq(
         CSRField("cfg0", 7, 0, WARL((old, raw) => Mux(old(7), old, raw))),
-        CSRField("cfg1", 15, 8, WARL((old, raw) => Mux(old(15), old, raw))),
-        CSRField("cfg2", 23, 16, WARL((old, raw) => Mux(old(23), old, raw))),
-        CSRField("cfg3", 31, 24, WARL((old, raw) => Mux(old(31), old, raw))))
+        CSRField("cfg1", 15, 8, WARL((old, raw) => Mux(old(7), old, raw))),
+        CSRField("cfg2", 23, 16, WARL((old, raw) => Mux(old(7), old, raw))),
+        CSRField("cfg3", 31, 24, WARL((old, raw) => Mux(old(7), old, raw))))
       )
     } ++ (0 until 64).map { i =>
       CSRDesc(0x3B0 + i, s"pmpaddr$i", phys.pmp.pmpaddr(i), Seq(
@@ -461,7 +461,7 @@ class CSRsUnit extends Module with CPUConfig {
     val nextPhys = WireDefault(phys)
     val targetPC = Wire(UInt(32.W))
     
-    val causeCode = cause(30, 0)
+    val causeCode = cause(4, 0)
     
     // 计算是否代理到 S-mode 处理 Trap
     val delegateToS = (currentPriv =/= PrivMode.M.asUInt) && 
@@ -595,9 +595,9 @@ class CSRsUnit extends Module with CPUConfig {
   )
 
   // 4. Mux 确定结果
-  val nextPhysCSRs = Wire(new CSRCoreState)
-  val flushFlag = Wire(Bool())
-  val flushPC = Wire(UInt(32.W))
+  val nextPhysCSRs = WireDefault(currentState)
+  val flushFlag = WireDefault(false.B)
+  val flushPC = WireDefault(0.U(32.W))
 
   switch (updateSource) {
     is (UpdateSource.Trap) {
@@ -639,6 +639,9 @@ class CSRsUnit extends Module with CPUConfig {
   // CSR 写响应
   io.csrWriteResp.valid := io.csrWriteReq.valid
   io.csrWriteResp.bits.exception := rwException
+
+  io.csrReadReq.ready := updateSource === UpdateSource.None
+  io.csrWriteReq.ready := updateSource === UpdateSource.None
 
   // 输出当前特权级
   io.privMode := physCSRs.privMode

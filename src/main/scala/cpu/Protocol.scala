@@ -85,20 +85,20 @@ object PrivMode extends ChiselEnum {
 
 // 异常原因编码 (mcause)
 object ExceptionCause {
-  val INSTRUCTION_ADDRESS_MISALIGNED = 0.U(4.W)
-  val INSTRUCTION_ACCESS_FAULT = 1.U(4.W)
-  val ILLEGAL_INSTRUCTION = 2.U(4.W)
-  val BREAKPOINT = 3.U(4.W)
-  val LOAD_ADDRESS_MISALIGNED = 4.U(4.W)
-  val LOAD_ACCESS_FAULT = 5.U(4.W)
-  val STORE_ADDRESS_MISALIGNED = 6.U(4.W)
-  val STORE_ACCESS_FAULT = 7.U(4.W)
-  val ECALL_FROM_U_MODE = 8.U(4.W)
-  val ECALL_FROM_S_MODE = 9.U(4.W)
-  val ECALL_FROM_M_MODE = 11.U(4.W)
-  val INSTRUCTION_PAGE_FAULT = 12.U(4.W)
-  val LOAD_PAGE_FAULT = 13.U(4.W)
-  val STORE_PAGE_FAULT = 15.U(4.W)
+  val INSTRUCTION_ADDRESS_MISALIGNED = 0.U(32.W)
+  val INSTRUCTION_ACCESS_FAULT = 1.U(32.W)
+  val ILLEGAL_INSTRUCTION = 2.U(32.W)
+  val BREAKPOINT = 3.U(32.W)
+  val LOAD_ADDRESS_MISALIGNED = 4.U(32.W)
+  val LOAD_ACCESS_FAULT = 5.U(32.W)
+  val STORE_ADDRESS_MISALIGNED = 6.U(32.W)
+  val STORE_ACCESS_FAULT = 7.U(32.W)
+  val ECALL_FROM_U_MODE = 8.U(32.W)
+  val ECALL_FROM_S_MODE = 9.U(32.W)
+  val ECALL_FROM_M_MODE = 11.U(32.W)
+  val INSTRUCTION_PAGE_FAULT = 12.U(32.W)
+  val LOAD_PAGE_FAULT = 13.U(32.W)
+  val STORE_PAGE_FAULT = 15.U(32.W)
 }
 
 // 中断原因编码 (mcause)
@@ -133,7 +133,7 @@ object AXIID extends ChiselEnum {
 // 在流水线的多个阶段透传的数据。
 class Exception extends Bundle {
   val valid = Bool()
-  val cause = UInt(4.W)
+  val cause = UInt(32.W)
   val tval = UInt(32.W)
 }
 
