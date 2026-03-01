@@ -165,7 +165,7 @@ class CSRsUnit extends Module with CPUConfig {
         CSRField("WPRI", 6, 6, WPRI),
         CSRField("STIP", 5, 5, RW),
         CSRField("WPRI", 4, 4, WPRI),
-        CSRField("MSIP", 3, 3, RO),
+        CSRField("MSIP", 3, 3, RW),
         CSRField("WPRI", 2, 2, WPRI),
         CSRField("SSIP", 1, 1, RW),
         CSRField("WPRI", 0, 0, WPRI)
@@ -477,7 +477,7 @@ class CSRsUnit extends Module with CPUConfig {
       // M-Mode Trap Entry
       nextPhys.mMode.mstatus := updateMstatusOnTrapEntry(phys.mMode.mstatus, currentPriv)
       nextPhys.mMode.mepc    := pc
-      nextPhys.mMode.mcause  := Cat(isInterrupt, causeCode)
+      nextPhys.mMode.mcause  := Cat(isInterrupt, 0.U(26.W), causeCode)
       nextPhys.mMode.mtval   := tval
       nextPhys.privMode      := PrivMode.M.asUInt
       
@@ -574,10 +574,13 @@ class CSRsUnit extends Module with CPUConfig {
   )
 
   // 2. 计算 Trap Handling 结果
+  val interruptCause = PriorityEncoder(pendingInterrupts)
+  val causeCode = Mux(isInterrupt, interruptCause, io.exception.cause)
+  val tval = Mux(isInterrupt, 0.U, io.exception.tval)
   val (csrTrapResult, globalTrapPC) = handleTrap(
     io.pc,
-    io.exception.cause,
-    io.exception.tval, 
+    causeCode,
+    tval, 
     isInterrupt, 
     physCSRs.privMode, 
     currentState
