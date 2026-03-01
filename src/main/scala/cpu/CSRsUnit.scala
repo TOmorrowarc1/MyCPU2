@@ -3,17 +3,6 @@ package cpu
 import chisel3._
 import chisel3.util._
 
-/**
- * CSRsUnit - CPU 特权级管理核心模块
- * 
- * 功能：
- * 1. 物理 CSR 寄存器堆管理
- * 2. CSR 读写检查（权限、字段规则、别名同步）
- * 3. Trap 处理（M-mode 和 S-mode 的进入和返回）
- * 4. 特权级控制（U=0, S=1, M=3）
- * 5. 内存访问控制（PMP 配置、satp 配置）
- * 6. 全局控制（globalFlush 信号）
- */
 class CSRsUnit extends Module with CPUConfig {
   val io = IO(new Bundle {
     // CSR 指令访问
@@ -87,15 +76,15 @@ class CSRsUnit extends Module with CPUConfig {
   }
 
   // 初始化物理 CSR 寄存器
-  val physCSRs = RegInit(0.U.asTypeOf(new CSRCoreState))
-  physCSRs.privMode := PrivMode.M.asUInt
-  physCSRs.mMode.misa := 0x40001104.U  // RV32I + M + S
-
-  // 周期计数器自动递增
-  physCSRs.mMode.mcycle := physCSRs.mMode.mcycle + 1.U
+  val resetState = Wire(new CSRCoreState)
+  resetState := 0.U.asTypeOf(new CSRCoreState)
+  resetState.mMode.misa := "h40000100".U
+  resetState.privMode   := 3.U           // 3 = Machine Mode (11)
 
   val globalFlush = RegInit(false.B)
   val globalFlushPC = RegInit(0.U(32.W))
+
+  val physCSRs = RegInit(resetState)
 
   // ============================================================================
   // 2. CSR 字段类型和描述符
@@ -183,7 +172,7 @@ class CSRsUnit extends Module with CPUConfig {
       )),
       CSRDesc(0x305, "mtvec", phys.mMode.mtvec, Seq(
         CSRField("BASE", 31, 2, WARL((old, raw) => raw & "hFFFF_FFFC".U)),
-        CSRField("MODE", 1, 0, RW)
+        CSRField("MODE", 1, 0, WARL((old, raw) => Mux(raw === 2.U, 0.U, raw)))
       )),
       CSRDesc(0x341, "mepc", phys.mMode.mepc, Seq(
         CSRField("BASE", 31, 0, WARL((old, raw) => raw & "hFFFF_FFFC".U))
@@ -230,30 +219,30 @@ class CSRsUnit extends Module with CPUConfig {
         CSRField("WPRI", 31, 12, WPRI),
         CSRField("WPRI", 11, 11, WPRI),
         CSRField("WPRI", 10, 10, WPRI),
-        CSRField("SEIE", 9, 9, WARL((old, raw) => Mux(phys.mMode.mideleg(9), old, raw))),
+        CSRField("SEIE", 9, 9, WARL((old, raw) => Mux(phys.mMode.mideleg(9), raw, old))),
         CSRField("WPRI", 8, 8, WPRI),
         CSRField("WPRI", 7, 7, WPRI),
         CSRField("WPRI", 6, 6, WPRI),
-        CSRField("STIE", 5, 5, WARL((old, raw) => Mux(phys.mMode.mideleg(5), old, raw))),
+        CSRField("STIE", 5, 5, WARL((old, raw) => Mux(phys.mMode.mideleg(5), raw, old))),
         CSRField("WPRI", 4, 4, WPRI),
         CSRField("WPRI", 3, 3, WPRI),
         CSRField("WPRI", 2, 2, WPRI),
-        CSRField("SSIE", 1, 1, WARL((old, raw) => Mux(phys.mMode.mideleg(1), old, raw))),
+        CSRField("SSIE", 1, 1, WARL((old, raw) => Mux(phys.mMode.mideleg(1), raw, old))),
         CSRField("WPRI", 0, 0, WPRI)
       )),
       CSRDesc(0x144, "sip", phys.mMode.mip, Seq(
         CSRField("WPRI", 31, 12, WPRI),
         CSRField("WPRI", 11, 11, WPRI),
         CSRField("WPRI", 10, 10, WPRI),
-        CSRField("SEIP", 9, 9, WARL((old, raw) => Mux(phys.mMode.mideleg(9), old, raw))),
+        CSRField("SEIP", 9, 9, WARL((old, raw) => Mux(phys.mMode.mideleg(9), raw, old))),
         CSRField("WPRI", 8, 8, WPRI),
         CSRField("WPRI", 7, 7, WPRI),
         CSRField("WPRI", 6, 6, WPRI),
-        CSRField("STIP", 5, 5, WARL((old, raw) => Mux(phys.mMode.mideleg(5), old, raw))),
+        CSRField("STIP", 5, 5, WARL((old, raw) => Mux(phys.mMode.mideleg(5), raw, old))),
         CSRField("WPRI", 4, 4, WPRI),
         CSRField("WPRI", 3, 3, WPRI),
         CSRField("WPRI", 2, 2, WPRI),
-        CSRField("SSIP", 1, 1, WARL((old, raw) => Mux(phys.mMode.mideleg(1), old, raw))),
+        CSRField("SSIP", 1, 1, WARL((old, raw) => Mux(phys.mMode.mideleg(1), raw, old))),
         CSRField("WPRI", 0, 0, WPRI)
       )),
       CSRDesc(0x180, "satp", phys.sMode.satp, Seq(
@@ -308,7 +297,7 @@ class CSRsUnit extends Module with CPUConfig {
     phys: CSRCoreState,
     registry: Seq[CSRDesc]
   ): (UInt, Exception, CSRCoreState) = {
-    
+    printf(p"cmdAddr${cmdAddr}")
     val rdata = WireDefault(0.U(32.W))
     val exception = WireDefault(0.U.asTypeOf(new Exception))
     val nextPhysRegs = WireDefault(phys)
@@ -343,15 +332,19 @@ class CSRsUnit extends Module with CPUConfig {
             accWire
         }
       }
-      
+
+      when(isMatch) {
+        // The 'p' interpolator prints hardware values
+        printf(p"Dynamic Check - CSR ${desc.name}: Read=0x${Hexadecimal(readData)} wdata=0x${Hexadecimal(wdata)} Next=0x${Hexadecimal(nextData)}\n")
+      }
       (isMatch, readData, nextData, desc)
     }
     
     // 检查是否有地址匹配
     val addressMatched = evalResults.map(_._1).reduce(_ || _)
     exception.valid := !addressMatched
-    exception.cause := ExceptionCause.ILLEGAL_INSTRUCTION
-    exception.tval := cmdAddr
+    exception.cause := Mux(!addressMatched, ExceptionCause.ILLEGAL_INSTRUCTION, 0.U)
+    exception.tval := Mux(!addressMatched, cmdAddr, 0.U)
     
     // 计算读取结果
     rdata := Mux1H(evalResults.map(x => x._1 -> x._2))
@@ -392,6 +385,7 @@ class CSRsUnit extends Module with CPUConfig {
       }
     }
     
+    printf(p"Mstatus=0x${Hexadecimal(nextPhysRegs.mMode.mstatus)}\n")
     (rdata, exception, nextPhysRegs)
   }
 
@@ -550,7 +544,7 @@ class CSRsUnit extends Module with CPUConfig {
   val isReturn = io.mret || io.sret
 
   // CSR 读写条件判断
-  val isCsrRW = io.isCSR
+  val isCsrRW = io.csrWriteReq.fire || io.csrReadReq.fire
 
   // 优先级：异常 > 中断 > 返回指令 > CSR 读写
   val updateSource = MuxCase(UpdateSource.None, Seq(
@@ -569,8 +563,10 @@ class CSRsUnit extends Module with CPUConfig {
   val registry = buildCSRRegistry(physCSRs)
 
   // 1. 计算 CSR Read/Write 结果
+  val cmdRAddr = Mux(io.csrReadReq.valid, io.csrReadReq.bits.csrAddr, 0.U)
+  val cmdWAddr = Mux(io.csrWriteReq.valid, io.csrWriteReq.bits.csrAddr, 0.U)
   val (rdata, rwException, csrRWResult) = generateCSRRWLogic(
-    io.csrWriteReq.bits.csrAddr, 
+    cmdRAddr | cmdWAddr, 
     io.csrWriteReq.bits.data, 
     io.csrWriteReq.valid, 
     currentState, 
@@ -617,10 +613,12 @@ class CSRsUnit extends Module with CPUConfig {
     }
     is (UpdateSource.None) {
       nextPhysCSRs := currentState
-      flushFlag := false.B
-      flushPC := 0.U
+      flushFlag := io.isCSR
+      flushPC := Mux(io.isCSR, io.pc, 0.U)
     }
   }
+  
+  nextPhysCSRs.mMode.mcycle := physCSRs.mMode.mcycle + 1.U
 
   // 5. 更新物理寄存器
   physCSRs := nextPhysCSRs
@@ -640,8 +638,8 @@ class CSRsUnit extends Module with CPUConfig {
   io.csrWriteResp.valid := io.csrWriteReq.valid
   io.csrWriteResp.bits.exception := rwException
 
-  io.csrReadReq.ready := updateSource === UpdateSource.None
-  io.csrWriteReq.ready := updateSource === UpdateSource.None
+  io.csrReadReq.ready := !globalFlush
+  io.csrWriteReq.ready := !globalFlush
 
   // 输出当前特权级
   io.privMode := physCSRs.privMode
@@ -655,4 +653,5 @@ class CSRsUnit extends Module with CPUConfig {
 
   // 输出 PMP 地址寄存器
   io.pmpAddr := physCSRs.pmp.pmpaddr
+  printf(p"UpdateSource=${updateSource}, MStatus=0x${Hexadecimal(physCSRs.mMode.mstatus)}\n")
 }
