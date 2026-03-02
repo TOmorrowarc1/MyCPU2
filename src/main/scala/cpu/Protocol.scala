@@ -275,8 +275,6 @@ class ZicsrDispatch extends Bundle with CPUConfig {
 // 4. 后端执行 (Backend: Issue, PRF, EU)
 // ============================================================================
 
-// 采用了 **Explicit Register Renaming** 风格（发射后读 PRF）。
-
 // RS -> PRF
 class PrfReadPacket extends Bundle with CPUConfig {
   val raddr1 = PhyTag
@@ -352,7 +350,6 @@ class CsrWriteResp extends Bundle with CPUConfig {
   val exception = new Exception
 }
 
-// 与 LSU 相关部分尚未定义 (TODO)
 
 // ============================================================================
 // 5. 写回与广播 (Writeback & CDB)
@@ -483,16 +480,10 @@ class AGUResp extends Bundle with CPUConfig {
   val ctx = new MemContext // 原样带回的内存上下文
 }
 
-// 6.6 PMA 检查器接口 (Physical Memory Attributes Checker)
-
-// PMA 检查请求
-class PMACheckReq extends Bundle {
-  val pa = UInt(34.W) // 物理地址
-}
-
-// PMA 检查响应
-class PMACheckResp extends Bundle {
-  val isIO = Bool() // 是否为 I/O 区域 (非幂等，不可乱序，不可缓存)
+class PMPCheckReq extends Bundle with CPUConfig {
+  val addr = UInt(32.W) // 物理地址
+  val memOp = LSUOp() // 访存类型 (Load/Store)
+  val privMode = PrivMode() // 特权级
 }
 
 // 6.7 LSU 接口 (Load Store Unit)
@@ -510,33 +501,25 @@ class LSUDispatch extends Bundle with CPUConfig {
 }
 
 // LSU Cache 请求 (LSU -> Cache)
-class LSUCacheReq extends Bundle with CPUConfig {
+class LSUCacheRReq extends Bundle with CPUConfig {
   val addr = UInt(32.W) // 物理地址
-  val isWrite = Bool() // 写操作标志
-  val data = UInt(512.W) // 写数据
-  val strb = UInt(64.W) // 字节掩码
+  val ctx = new MemContext // 上下文信息
+}
+
+class LSUCacheWReq extends Bundle with CPUConfig {
+  val addr = UInt(32.W) // 物理地址
+  val data = UInt(32.W) // 写数据
   val ctx = new MemContext // 上下文信息
 }
 
 // LSU Cache 响应 (Cache -> LSU)
-class LSUCacheResp extends Bundle with CPUConfig {
-  val data = UInt(512.W) // 读数据
+class LSUCacheRResp extends Bundle with CPUConfig {
+  val data = UInt(32.W) // 读数据
   val ctx = new MemContext // 回传的上下文
-  val exception = new Exception // 访问异常
 }
 
-// LSU ROB 退休请求 (ROB -> LSU)
-class LSUCommit extends Bundle with CPUConfig {
-  val robId = RobTag // 退休的 ROB 条目 ID
-}
-
-// LSU CDB 消息 (LSU -> CDB)
-class LSUCDBMessage extends Bundle with CPUConfig {
-  val robId = RobTag // ROB 条目 ID
-  val phyRd = PhyTag // 目标物理寄存器 (Load 指令)
-  val data = DataW // Load 结果数据
-  val isIO = Bool() // 是否为 IO Load
-  val exception = new Exception // 执行异常
+class LSUCacheWResp extends Bundle with CPUConfig {
+  val ctx = new MemContext // 回传的上下文
 }
 
 // 6.8 AXI 仲裁器接口 (AXI Arbiter)
@@ -566,34 +549,6 @@ class AXIArbiterOut extends Bundle {
     val b = new WideAXI4Bundle().b.bits // D-Cache 写响应
   })
   val mainMemReq = new WideAXI4Bundle // 发往主存的统一 AXI 请求
-}
-
-// 6.9 内存系统顶层接口
-
-// 内存系统顶层接口 (MemorySystem 对外接口)
-class MemorySystemIO extends Bundle with CPUConfig {
-  // 1. 指令取指接口
-  val if_req = Flipped(Decoupled(new FetchReq))
-  val if_resp = Decoupled(new FetchResp)
-
-  // 2. LSU 接口
-  val lsu_dispatch = Flipped(Decoupled(new LSUDispatch))
-  val lsu_agu_req = Flipped(Decoupled(new AGUReq))
-  val lsu_agu_resp = Decoupled(new AGUResp)
-  val lsu_cache_req = Flipped(Decoupled(new LSUCacheReq))
-  val lsu_cache_resp = Decoupled(new LSUCacheResp)
-  val lsu_commit = Input(new LSUCommit)
-  val lsu_cdb = Output(new LSUCDBMessage)
-
-  // 3. 全局控制
-  val sfence = Input(Bool()) // SFENCE.VMA 信号
-  val csr = Input(new Bundle {
-    val pmp = UInt(128.W) // PMP 配置 (简化版)
-  })
-  val flush = Input(new Bundle {
-    val global = Bool() // 全局冲刷信号
-    val branchKill = UInt(4.W) // 分支冲刷掩码
-  })
 }
 
 // ============================================================================
