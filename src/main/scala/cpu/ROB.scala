@@ -59,7 +59,6 @@ class ROB extends Module with CPUConfig {
     val mret = Output(Bool())
     val sret = Output(Bool())
     val fenceI = Output(Bool())
-    val sfenceVma = Output(new SFenceReq)
   })
 
   // ==================== 1. 状态定义 ====================
@@ -162,9 +161,6 @@ class ROB extends Module with CPUConfig {
   io.mret := false.B
   io.sret := false.B
   io.fenceI := false.B
-  io.sfenceVma.valid := false.B
-  io.sfenceVma.rs1 := 0.U
-  io.sfenceVma.rs2 := 0.U
   io.commitRAT.valid := false.B
   io.commitRAT.bits.archRd := 0.U
   io.commitRAT.bits.phyRd := 0.U
@@ -206,13 +202,6 @@ class ROB extends Module with CPUConfig {
           is(SpecialInstr.FENCEI) {
             commitState := CommitState.s_WAIT
             io.fenceI := true.B
-          }
-          // SFENCE.VMA 指令
-          is(SpecialInstr.SFENCE) {
-            commitState := CommitState.s_WAIT
-            io.sfenceVma.valid := true.B
-            io.sfenceVma.rs1 := 0.U // 默认值，实际应从指令中提取
-            io.sfenceVma.rs2 := 0.U // 默认值，实际应从指令中提取
           }
           // WFI 指令（当作 NOP）
           is(SpecialInstr.WFI) {

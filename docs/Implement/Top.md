@@ -111,19 +111,19 @@
     *   向 CBD 发送 `{RobID, Result(OldValue), Exception}` (用于写回 `rd`)。
 
 ### 2.5 LSU (Load Store Unit)
-*   **组成**：LSQ (访存队列), AGU (地址生成), MMU, PMP, Cache(Cache + AXI + MainMemory)。
-*   **职责**：处理所有内存访问，维护访存顺序一致性，处理虚实地址转换与权限检查。
+*   **组成**：LSQ (访存队列), AGU & PMP (地址生成与权限检查), Cache(Cache + AXI + MainMemory)。
+*   **职责**：处理所有内存访问，维护访存顺序一致性，处理地址生成与权限检查。
 *   **输入**：
     *   来自 RS 的 `{LSUOp, Imm, RobID, PrivMode, D-Epoch, BranchMask}`。
     *   来自 PRF 的 `{BaseAddr, StoreData}`。
     *   来自 ROB 的 `CommitStore/CommitIO` 信号。
     *   来自 Memory Access System 的 `MemResponse`。
 *   **逻辑简述**：
-    *   **AGU**：计算 `VA = Base + Imm`。
-    *   **翻译与检查**：请求 TLB 进行 VA->PA 转换，并发进行 PMP/PMA 检查。若异常，标记 `Exception`。
+    *   **AGU**：计算 `PA = Base + Imm`（物理地址直接计算）。
+    *   **权限检查**：进行 PMP 检查。若异常，标记 `Exception`。
     *   **Load 处理**：
-        *   若 PMA 为 RAM：查 Store Queue (Forwarding)，若无冲突则发往 D-Cache。
-        *   若 PMA 为 I/O：进入 `Wait_Commit` 状态，等待 ROB 信号。
+        *   查 Store Queue (Forwarding)，若无冲突则发往 D-Cache。
+        *   若为 I/O：进入 `Wait_Commit` 状态，等待 ROB 信号。
     *   **Store 处理**：将 `{PA, StoreData}` 写入 Store Queue。**不发送总线请求**，等待 ROB Commit 信号。
     *   **冲刷**：响应 `GlobalFlush` (清空所有) 和 `BranchFlush` (根据 Mask 清空 Load，Store 保留直到退休)。
 *   **输出**：
@@ -233,7 +233,7 @@
 
 ## 4. 内存模块
 
-### 4.1 SimRAM
+### 4.1 MainMemory
 
 #### 4.1.1 协议定义：Wide-AXI4 接口
 
@@ -253,41 +253,55 @@ class AXIContext extends Bundle {
   val epoch      = UInt(2.W)
 }
 
-// 2. 定义宽总线接口
+// 2. 定义各通道的独立 Bundle
+
+// 读地址通道 (AR - Read Address)
+class AXIARBundle extends Bundle {
+  val addr = UInt(32.W)
+  val id   = new AXIID        // 事务 ID (区分 I/D Cache)
+  val len  = UInt(8.W)        // Burst 长度，宽总线通常为 0
+  val user = new AXIContext   // 携带元数据
+}
+
+// 读数据通道 (R - Read Data)
+class AXIRBundle extends Bundle {
+  val data = UInt(512.W)      // 512-bit 宽数据
+  val id   = new AXIID
+  val last = Bool()           // Burst 结束标志，宽总线返回结果当周期拉高
+  val user = new AXIContext   // 回传元数据
+}
+
+// 写地址通道 (AW - Write Address)
+class AXIAWBundle extends Bundle {
+  val addr = UInt(32.W)
+  val id   = new AXIID
+  val len  = UInt(8.W)
+  val user = new AXIContext
+}
+
+// 写数据通道 (W - Write Data)
+class AXIWBundle extends Bundle {
+  val data = UInt(512.W)
+  val strb = UInt(64.W)       // 字节掩码 (64 bytes -> 64 bits)
+  val last = Bool()
+}
+
+// 写响应通道 (B - Write Response)
+class AXIBBundle extends Bundle {
+  val id   = new AXIID
+  val user = new AXIContext
+}
+
+// 3. 定义宽总线接口
 class WideAXI4Bundle extends Bundle {
   // --- 读路径 ---
-  val ar = Decoupled(new Bundle {
-    val addr = UInt(32.W)
-    val id   = new AXIID        // 事务 ID (区分 I/D Cache)
-    val len  = UInt(8.W)        // Burst 长度，宽总线通常为 0
-    val user = new AXIContext   // 携带元数据
-  })
-  
-  val r = Flipped(Decoupled(new Bundle {
-    val data = UInt(512.W)      // 512-bit 宽数据
-    val id   = new AXIID
-    val last = Bool()           // Burst 结束标志，宽总线返回结果当周期拉高
-    val user = new AXIContext   // 回传元数据
-  }))
+  val ar = Decoupled(new AXIARBundle)
+  val r = Flipped(Decoupled(new AXIRBundle))
 
   // --- 写路径 ---
-  val aw = Decoupled(new Bundle {
-    val addr = UInt(32.W)
-    val id   = new AXIID
-    val len  = UInt(8.W)
-    val user = new AXIContext
-  })
-  
-  val w = Decoupled(new Bundle {
-    val data = UInt(512.W)
-    val strb = UInt(64.W)       // 字节掩码 (64 bytes -> 64 bits)
-    val last = Bool()
-  })
-  
-  val b = Flipped(Decoupled(new Bundle {
-    val id   = new AXIID
-    val user = new AXIContext
-  }))
+  val aw = Decoupled(new AXIAWBundle)
+  val w = Decoupled(new AXIWBundle)
+  val b = Flipped(Decoupled(new AXIBBundle))
 }
 ```
 
@@ -298,11 +312,11 @@ class WideAXI4Bundle extends Bundle {
 ##### 输入/输出接口
 *   `io.axi`: **`Flipped(new WideAXI4Bundle)`**
     *   **来源**：`AXIArbiter`。
-    *   `Flipped` 意味着 SimRAM 是 **Slave**（从设备）：它接收 AR/AW/W 的 `valid`，输出 AR/AW/W 的 `ready`；它输出 R/B 的 `valid`，接收 R/B 的 `ready`。
+    *   `Flipped` 意味着 MainMemory 是 **Slave**（从设备）：它接收 AR/AW/W 的 `valid`，输出 AR/AW/W 的 `ready`；它输出 R/B 的 `valid`，接收 R/B 的 `ready`。
 
 #### 4.1.4 内部逻辑与时序模型
 
-由于 `SyncReadMem` 是同步读（1 周期延迟），而我们需要模拟更长的物理延迟（例如 10 周期），需要一个明确的 **FSM (有限状态机)**。
+由于 `SyncReadMem` 是同步读（1 周期延迟），而我们需要模拟更长的物理延迟（例如 10 周期），因此需要内嵌一个的 **有限状态机**。
 
 ##### 4.1.4.1 Chisel SRAM 特性说明
 *   **原语**：`SyncReadMem`。
@@ -331,14 +345,13 @@ object RamState extends ChiselEnum {
 
 *   1. **IDLE (空闲态)**
 *   **逻辑**：同时监听 `io.axi.ar.valid` 和 `io.axi.aw.valid`。
-*   **仲裁**：如果两者同时为 1，通常 **读优先 (Read Priority)**（因为 Load 阻塞流水线，Store 不阻塞）。
-    > 对于该实现两者不会同时为 1。
+*   **仲裁**：对于该实现两者不会同时为 1。
 *   **动作 (若读请求)**：
     *   锁存 `ar` 信息到 `req_reg`。
     *   置计数器 `counter := LATENCY - 1`。
     *   跳转 `sReadDelay`。
 *   **动作 (若写请求)**：
-    *   锁存 `aw` 与 `w` 信息，如果字节掩码存在且地址未能与 64 为掩码对齐，则通过组合逻辑移位后存入 `req_reg`。
+    *   锁存 `aw` 与 `w` 信息，如果字节掩码存在且地址未能与 64 位掩码对齐，则通过组合逻辑移位后存入 `req_reg`。
       > 该实现中两者同时到来。
     *   置计数器 `counter := LATENCY - 1`。
     *   跳转 `sWriteDelay`。
@@ -364,11 +377,11 @@ object RamState extends ChiselEnum {
 ### 4.2 AXIArbiter
 
 #### 4.2.1 职责
-*   **请求汇聚 (Request Fan-in)**：将 I-Cache 的读请求与 D-Cache 的读/写请求进行仲裁，按照优先级顺序送往 `Wide-AXI4` 主总线。
-*   **响应分发 (Response Demux)**：通过 AXI ID 识别总线返回的数据（R 通道）或写确认（B 通道），将其路由回正确的 Cache 模块。
+*   **请求汇聚**：将 I-Cache 的读请求与 D-Cache 的读/写请求进行仲裁，按照优先级顺序送往 `Wide-AXI4` 主总线。
+*   **响应分发**：通过 AXI ID 识别总线返回的数据（R 通道）或写确认（B 通道），将其路由回正确的 Cache 模块。
 
 #### 4.2.2 维护状态
-*   **`is_busy` (Reg)**：标记当前总线是否正在处理一个尚未完成的事务。
+*   **`isBusy` (Reg)**：标记当前总线是否正在处理一个尚未完成的事务。
     *   对于读：从 `AR.fire` 开始，到 `R.fire && R.bits.last` 结束。
     *   对于写：从 `AW.fire` 开始，到 `B.fire` 结束。
 
@@ -377,17 +390,17 @@ object RamState extends ChiselEnum {
 ##### 4.2.3.1 输入 (Inputs)
 | 信号名 | 来源 | 类型 | 描述 |
 | :--- | :--- | :--- | :--- |
-| `i_cache.req` | I-Cache | `WideAXI4.AR` | 指令取指 Miss 请求 |
-| `d_cache.req_r`| D-Cache | `WideAXI4.AR` | 数据读取 Miss 请求 |
-| `d_cache.req_w`| D-Cache | `WideAXI4.AW/W`| 数据写回 (Write-back) 或 Uncached Store |
-| `main_mem.resp`| SimRAM | `WideAXI4.R/B` | 总线回传的数据或写确认 |
+| `IcacheReq` | I-Cache | `Decoupled(new AXIARBundle)` | 指令取指 Miss 请求 |
+| `DcacheRReq`| D-Cache | `Decoupled(new AXIARBundle)` | 数据读取 Miss 请求 |
+| `DcacheWReq`| D-Cache | `Decoupled(new AXIAWBundle)` + `Decoupled(new AXIWBundle)` | 数据写回 |
+| `mainMemResp`| MainMemory | `Flipped(Decoupled(new AXIRBundle))` + `Flipped(Decoupled(new AXIBBundle))` | 总线回传的数据与写确认 |
 
 ##### 4.2.3.2 输出 (Outputs)
 | 信号名 | 目标 | 类型 | 描述 |
 | :--- | :--- | :--- | :--- |
-| `i_cache.resp` | I-Cache | `WideAXI4.R` | 返回 512-bit 指令块 |
-| `d_cache.resp` | D-Cache | `WideAXI4.R/B` | 返回 512-bit 数据块或写回确认 |
-| `main_mem.req` | SimRAM | `WideAXI4.Req` | 发向主存的统一 AXI 请求 |
+| `IcacheResp` | I-Cache | `Flipped(Decoupled(new AXIRBundle))` | 返回 512-bit 指令块 |
+| `DcacheResp` | D-Cache | `Flipped(Decoupled(new AXIRBundle))` + `Flipped(Decoupled(new AXIBBundle))` | 返回 512-bit 数据块或写回确认 |
+| `mainMemReq` | MainMemory | `WideAXI4Bundle` | 发向主存的统一 AXI 请求 |
 
 #### 4.2.4 内部逻辑简述
 
@@ -395,128 +408,96 @@ object RamState extends ChiselEnum {
 仲裁器优先级固定：**D-Cache > I-Cache**。
 
 *   **逻辑公式**：
-    *   `can_issue := !is_busy` (总线空闲)。
-    *   `d_wins := d_cache.req.valid`。
-    *   `i_wins := i_cache.req.valid && !d_cache.req.valid`。
+    *   `canIssue := !isBusy` (总线空闲)。
+    *   `dWins := dCacheRReq.valid || dCacheWReq.valid`。
+    *   `iWins := iCacheReq.valid && !dWins`。
 *   **握手输出**：
-    *   `d_cache.req.ready := can_issue && d_wins`。
-    *   `i_cache.req.ready := can_issue && i_wins`。
-*   **状态迁移**：当 `main_mem.ar.fire` 或 `main_mem.aw.fire` 时，`is_busy` 置 1，将对应请求转发到主线，同时 AXIID 规定 I-cache 为 0，D-cache 为 1。
+    *   `dCacheRReq.ready := canIssue && dWins && dCacheRReq.valid`。
+    *   `dCacheWReq.ready := canIssue && dWins && dCacheWReq.valid`。
+    *   `iCacheReq.ready := canIssue && iWins`。
+*   **状态迁移**：当 `mainMemReq.fire` 或 `mainMem.aw.fire` 时，`isBusy` 置 1，将对应请求转发到主线。
+   > 规定 AXIID 规定 I-cache 为 0，D-cache 为 1。
 
 ##### 4.2.4.2 结果回传处理 (分发逻辑)
 
 *   **读数据回传 (R Channel)**：
-    *   inflight_id 为 main_mem 返回信息中的 id 值。  
-    *   `i_cache.resp.valid := main_mem.resp.valid && (inflight_id === 0.U)`
-    *   `d_cache.resp.valid := main_mem.resp.valid && (inflight_id === 1.U)`
-    *   `main_mem.resp.ready := Mux(inflight_id === 1.U, d_cache.resp.ready, i_cache.resp.ready)`
+    *   inflightId 为 mainMem 返回信息中的 id 值。
+    *   `iCacheResp.valid := mainMem.r.valid && (inflightId === 0.U)`
+    *   `dCacheRResp.valid := mainMem.r.valid && (inflightId === 1.U)`
+    *   `mainMem.r.ready := Mux(inflightId === 1.U, dCache.r.ready, iCache.r.ready)`
 *   **写确认回传 (B Channel)**：只有 D-Cache 会写
-    *   `d_cache.b.valid := main_mem.b.valid`。
-    *   `main_mem.b.ready := d_cache.b.ready`。
+    *   `dCacheWResp.valid := mainMem.b.valid`。
+    *   `mainMem.b.ready := dCache.b.ready`。
 
 ### 4.3 Cache
 
 *   **职责**：
     *   **物理地址缓存**：提供基于物理地址（PA）的高速数据读取与写入。
-    *   **多主设备仲裁**：在同一周期内接收 PTW（页表遍历）与 LSU（数据存取）的请求，并按照 **PTW 绝对优先**的原则进行调度。
     *   **主存访问**：通过 512-bit 宽总线向主存发起请求。
     *   **一致性与冲刷**：执行 FENCE.I 的脏行清空，并配合 Epoch/BranchMask 处理在途指令的逻辑废除。
-*   **组成**：**Priority Arbiter (PTW > LSU)**, Tag Array (SRAM), Data Array (SRAM), Status Array (Regs), pendingReq (Reg), In-flight Buffer (Size=2), AXI Master Interface, FENCE.I Controller。
+*   **组成（维护状态）**：Status(Pipeline, AXIPending, FENCEIActive), Tag Array (SRAM), Data Array (SRAM), Status Array (Regs), AXIReqBuffer (Reg, Size=2), FENCE.I Controller(记录当前扫描到行数与 Done).
 *   **输入**：
-    *   **来自 PTW 读请求接口**：`{PA, Width, Ctx(Epoch && branchMask)}`。
-    *   **来自 LSU/Fetcher 读接口**：`{PA, Width, Ctx}`。
-    *   **来自 LSU/Fetcher 写接口**: `{PA, Width, Ctx, wData}`。
-    *   **来自系统控制平面**：`GlobalFlush`, `BranchFlush`, `KillMask`。
-    *   **来自 ROB**：`FenceI_Req`。
+    *   **来自 LSU 读接口**：`{PA, Width, Ctx(branchMask, robId)}`。
+    *   **来自 LSU 写接口**: `{PA, Width, Ctx(branchMask, robId), wData}`。
+    *   **来自系统控制平面**：`globalFlush`, `branchFlush`, `branchOH`。
+    *   **来自 ROB**：`fenceIReq`。
     *   **来自 AXI 总线返回**：`{Ctx(Epoch), RData, BValid}`。
 *   **输出**：
-    *   **向请求方返回**：`PTW_Ready`, `LSU_Ready`（或 `Fetcher_Ready`）。
     *   **向请求方回复**：`{ReadData, Ctx}` 或 `{B, Ctx}`。
-    *   **向 AXI 总线发送**：`{ARAddr, AWAddr, WData, WStrb, User(Ctx)}`。
-    *   **状态信号**：`FenceI_Done`。
+    *   **向 AXI 总线发送**：`{arAddr, awAddr, wData, wStrb, User(Ctx)}`。
+    *   **状态信号**：`fenceIDone`。
 *   **逻辑简述**：
-    *   **前端优先级仲裁逻辑**：
-        *   每个周期检查两个输入端的 `valid`。
-        *   **仲裁规则**：`Winner := Mux(PTW.valid, PTW, LSU)`。
-        *   **Ready 反压**：
-            *   `PTW_Ready := io.axi_buffer.ready && !is_fence_i_active`。
-            *   `LSU_Ready := io.axi_buffer.ready && !is_fence_i_active && !PTW.valid`（只有 PTW 不抢占且 Buffer 有空位时才接纳 LSU）。
-    *   **内部流水线逻辑 (PIPT)**：
-        *   **Stage 1**：锁存仲裁胜出者的 `PA`、`Cmd`、`Id` 和 `Ctx`。发起对 Tag 和 Data SRAM 的同步读取。
-        *   **Stage 2**：比对 Tag。由于输入已是物理地址，直接比对 `SRAM_Tag` 与 `Reg_PA_Tag`。
-        *   **结果分发**：如果比对成功，则根据锁存的请求信息，将结果送回对应的 PTW 或 LSU 接口；如果 Miss，则开始总线访问主存，将生成的总线事务压入 AXI buffer。
+    *   **Ready 反压**：只有 `AXIReq` 为空且 `!isFenceIActive` 时才从 LSU 或 Fetecher 部分获取 Request。
+    *   **内部流水线逻辑**：使用两级流水线锁存请求信息，有两条流水线，分别对应读与写。
+        *   **Stage 1**：锁存进入请求的 `PA`、`Width`、`Ctx` 和可能的 `wdata`。发起对 Tag 和 Data SRAM 的同步读取。
+        *   **Stage 2**：请求信息前进一位。由于输入已是物理地址，直接比对 `SRAMTag` 与 `ReqPATag`。
+        *   **结果分发**：如果比对成功，则根据锁存的请求信息（因此锁存的请求也是流水线式寄存器），将读结果与 Ctx 送回对应的接口或将写结果写入对应 Cache Line 并置脏位，返回写响应与 Ctx ；如果 Miss，则开始总线访问主存。
     *   **缺失与回写逻辑**：
-        *   若 `Miss` 且该行 `Dirty`，启动 `Write-back`。
-        *   执行 `Refill`。
-        *   *注意*：上述请求都被压进 AXI buffer 且 buffer 记录 Ctx 信息。
-    *   **总线访问**：AXI Buffer 深度为 3，与 AxiAribiter 配合使用，确保总线请求的有序发出与响应的正确分发。当 2 个以上槽位在忙时不接收新请求，即 ready 全部拉低。 
+        *   若 `Miss` 且该行 `Dirty`，将状态由 `Pipeline` 切换到 `AXIReqPending`，生成的总线事务压入 AXIReqBuffer，该周期不接收新的指令进入 Cache。
+           > Buffer 实际只用于记录当周期在途事务信息，也就是最多读与写两条。
+        *   通过 AXIAribiter 发起总线请求，携带 `Epoch` 以便后续冲刷逻辑使用。
+           > 先发起写请求，再发起读请求。
+        *   两个请求结果都返回后，清空 AXIReqBuffer，如正常执行一般返回结果，状态切回 `Pipeline`。
     *   **冲刷逻辑**：
-        *   **逻辑撤销**：若 `branch_flush` 命中在途指令寄存器的 `Ctx.mask`，该请求匹配不返回信息，不匹配不进行主存访问。
-        *   **总线过滤**：已进入 AXI Buffer 的请求不可撤销。检查所有 AXI Buffer 中项目，修改其 `isKilled` 字段。当数据从 AXI 返回，检查其携带的 `user.epoch` 和 `user.mask`。若纪元过期或被标记 `killed`，则**吃掉数据，放空槽位且不更新 SRAM 阵列**。
+        *   **逻辑撤销**：若 `branchFlush` 命中在途指令寄存器的 `Ctx.mask`，该请求匹配不返回信息，不匹配不进行主存访问。
+        *   **总线过滤**：已进入 AXI Buffer 的请求不可撤销。在 `branchFlush` 拉高时，检查所有 AXI Buffer 中 Entry `branchMask` 并修改其 `aborted` 字段，若只拉高 `branchOH` 则移除对应分支依赖。在 `globalFlush` 拉高时移除所有 buffer 内请求。当数据从 AXI 返回，先后检查其携带的 `user.epoch` 并与对应 Entry 匹配。若纪元过期或被标记 `killed`，则**吃掉数据，放空槽位且不更新 SRAM 阵列**。
     *   **FENCE.I 序列化**：
-        *   一旦 `FenceI_Req` 有效，仲裁器强制将 `PTW_Ready` 和 `LSU_Ready` 拉低，进入独占式的扫描回写状态，直至完成。
+        *   一旦 `fenceIReq` 有效，检查当前 Cache 状态，若为 `AXIReqPending` 则先等待主线事务完成并返回结果；若为 `Pipeline` 则将状态切换至 `FENCEIActive` ，从当周期开始拉低输入接口 ready ，进入独占式的扫描回写状态，直至完成。
+        *   扫描回写：每周期检查一行 status ，清除所有 Cache Line 的有效位和脏位，将脏位为 1 的行写回主存，每次主线请求写回一行并暂停检查。
+        *   完成条件：当所有行的有效位和脏位都为 0 时，拉高 `fenceIDone` 信号，将 Controller 记录行数重置为 0 ，同时 Controller.Done 置为 1，若 Done 为 1 则 fenceIReq 高位不触发任何逻辑，也不进行扫描回写。当 fenceIReq 信号拉低时，Controller.Done 置为 0，状态切回 `Pipeline`。
 
-### 4.4 MMU
+### 4.4 AGU & PMP (Address Generation Unit & Physical Memory Protection)
 
 #### 4.4.1 职责
-*   **虚实地址翻译**：利用 TLB 进行单周期快速翻译（Sv32 协议）。
-*   **硬件页表遍历**：当 TLB 缺失时，自动启动 PTW 状态机爬取内存中的页表条目。
-*   **多层权限检查**：执行基于 PTE (U/R/W/X 位) 的虚拟权限检查，以及基于 PMP 寄存器的物理访问检查。
-*   **冲刷与同步**：处理 `SFENCE.VMA` 导致的 TLB 失效，以及 `Flush` 信号导致的在途翻译任务废除。
+*   **计算物理地址**：接收从 LSU 分派的操作数（Base）和指令自带的立即数（Offset），计算出物理地址（PA）。
+*   **地址对齐检查**：检测 PA 是否根据访存位宽（Byte/Half/Word）正确对齐，若未对齐则输出对齐异常。
+*   **PMP 权限检查**：检测物理地址 PA 与请求权限是否符合 PMP 规则，若不符合则输出访问异常。
+   > 上述逻辑均在一周期之内完成。
 
-#### 4.4.2 接口定义 (IO Bundle)
+#### 4.4.2 接口定义
+*   **输入**：
+    *   `baseAddr` (32 bits)：基地址寄存器值
+    *   `offset` (32 bits)：立即数偏移量
+    *   `memWidth`：访存位宽（Byte/Half/Word）
+    *   `memOp`：访存类型（Load/Store）
+    *   `privMode`：当前特权级（U/S/M）
+    *   `robId`：对应指令的 ID，返回结果后要赋值给对应 LSQ Entry
+*   **输出**：
+    *   `pa` (32 bits)：计算出的物理地址
+    *   `exception`：异常包（对齐异常或访问异常）
+    *   `robId`：原样带回
 
-##### 4.4.2.1 输入
-| 信号名 | 来源 | 类型 | 描述 |
-| :--- | :--- | :--- | :--- |
-| **Request** | **LSU** | | |
-| `VA` | LSU | `UInt(32.W)` | 待翻译的虚拟地址 |
-| `memOp` | LSU | `Enum` | 访问类型 (Load / Store / Atomic) |
-| `memWidth` | LSU | `Enum` | 访问位宽 (B / H / W) |
-| `ctx` | LSU | `MemContext` | 包含 `robId`, `epoch`, `branchMask`, `privMode` |
-| **Control** | **ROB/CSR** | | |
-| `sfence` | ROB | `Valid(SFenceReq)` | TLB 刷新请求 (含 rs1, rs2) |
-| `globalFlush` | ROB | `Bool` | 全局冲刷信号 |
-| `branchFlush` | BRU | `Bool` | 分支冲刷信号 |
-| `killMask` | BRU | `UInt(4.W)` | 需清除的分支掩码 |
-| `satp` | CSRsUnit | `UInt(32.W)` | 包含 Mode (Sv32) 与 PPN (根页表基址) |
+#### 4.4.3 内部逻辑
 
-##### 4.4.2.2 输出
-| 信号名 | 目标 | 类型 | 描述 |
-| :--- | :--- | :--- | :--- |
-| **Response** | **LSU** | | |
-| `PA` | LSU | `UInt(34.W)` | 翻译后的物理地址 (Sv32 输出为 34 位) |
-| `exception` | LSU | `ExcPacket` | 包含 `valid`, `cause` (Page/Access Fault), `tval` |
-| `resp_ctx` | LSU | `MemContext` | 原样带回的上下文信息 |
-| **Status** | **ROB** | | |
-| `sfence_done`| ROB | `Bool` | `SFENCE.VMA` 操作完成信号 |
+##### 4.4.3.1 地址生成逻辑
+*   **物理地址计算**：`pa = baseAddr + offset`
+*   **对齐检查**：
+    *   Byte：无需对齐
+    *   Half：最低 1 位必须为 0
+    *   Word：最低 2 位必须为 0
+    *   若未对齐，生成 `Load/Store_Address_Misaligned` 异常
 
-#### 4.4.3 内部子模块逻辑
-
-##### 4.4.3.1 TLB (Translation Lookaside Buffer)
-*   **输入**：`VA`, `privMode`, `sfence`。
-*   **输出**：`hit`, `PA`, `exception`, `pageAttr`（本次访问需要权限，供PMP 检查使用）。
-*   **存储结构**：`Reg(Vec(Entries, new TLBEntry))`，采用全相联查找以支持单周期输出。（实现为 16 条目 TLB）
-*   **内部逻辑**：
-    1.  **查找逻辑**：将 `va[31:12]` 与所有有效 Entry 并行比对。同时根据 `asid` 和 `G` 位判断是否匹配当前进程（该大作业不实现 `asid`，硬连线为 0）。
-    2.  **权限校验**：在比对成功的基础上，将 `pte.u`、`pte.r/w/x` 与输入请求的 `privMode` 及 `memOp` 进行组合逻辑比对，计算出所需权限并返回。
-    3.  **管理逻辑**：
-        *   当 `sfence.valid` 为高时：全量清空 `valid` 位。
-        *   当 PTW 返回新 PTE 时：采用随机算法替换旧 Entry。
-
-##### 4.4.3.2 PTW (Page Table Walker)
-*   **输入**：TLB Miss 信号, `va`, `satp`, `D-Cache` 返回数据。
-*   **输出**：写入 TLB 的数据, `TLBrefresh`, `exception`, `ready` (MMU)。
-*   **内部逻辑：状态机维护**：
-    *   `sIDLE`：等待 Miss。一旦启动，拉低 MMU 接口的 `ready`，阻塞后续翻译。
-    *   `sL1Req`：计算一级页表项地址 `PA = satp.ppn * 4096 + vpn[1] * 4` 并调用 PMP 模块检查该 PTE 地址的合法性，访问 D-cache。
-    *   `sL1Wait`：等待 D-Cache 返回。
-    *   `sL0Req`：若一级 PTE 指向二级页表，计算二级地址并再次发起 Cache 请求。
-    *   `sL0Wait`：等待二级页表数据。
-    *   **关键点**：PTW 在每次向 Cache 发起物理请求前，**必须调用 PMP 模块**进行 PTE 地址的合法性检查。若不合法返回异常信息；若合法则向 D-Cache 发起请求，注意请求需要包含 Ctx(Epoch, BranchMask)。
-    *   **Flush 处理**：所有请求携带 Ctx，且 PTW 本身维护在途请求的 Ctx，一旦出现 Flush 且与 branchMask 匹配则丢弃该请求并将状态机重置回 `sIDLE`。
-
-##### 4.4.3.3 PMP (Physical Memory Protection)
+##### 4.4.3.2 PMP 权限检查逻辑（组合逻辑）
 *   **输入**：物理地址 `PA`, 发起者 `privMode`, 权限需求 (R/W/X)。
 *   **输出**：`exception` 异常包。
 *   **逻辑**：纯粹组合逻辑，单周期内完成检测。
@@ -528,110 +509,112 @@ object RamState extends ChiselEnum {
         *   如果命中且权限不符：输出 `AccessFault = true`。
         *   如果没有条目命中且 `privMode < M`：默认输出 `AccessFault = true` (默认禁止策略)。
 
-#### 4.4.4 内部逻辑协同
-
-##### 4.4.4.1 TLB 命中
-在 TLB 命中情况下，VA -> PA 的翻译与检查单周期即可完成：VA 进入 TLB，TLB 吐出 Tag 结果。Hit 时 PA 进入 PMP 检查并返回 MMU 结果。
-
-##### 4.4.4.2 TLB 缺失
-1.  **启动 PTW**：MMU 拉低 `ready`，阻塞 LSU，PTW 状态机进入 `sL1Req`。
-2.  **页表爬取**：PTW 计算 PTE 地址，调用 PMP 检查，发起 D-Cache 读请求。
-3.  **获取结果**：待 PTW 返回结果后先更新 TLB，经 PMP 检查后返回结果，再拉高 MMU `ready`（此时 PTW 也进入 `sIDLE` 状态）。
-
-##### 4.4.4.3 Flush
-如果不在 PTW 爬表过程中，MMU 什么都不做；如果在 PTW 爬表过程中，PTW 检查其在途请求的 Ctx，一旦匹配则丢弃数据并回到 `sIDLE`。如果在爬取的最后一周期则允许 Entry 写入 TLB。 
-
-你的设计构思已经涵盖了乱序执行存储子系统的最核心挑战。将 **LSQ (Load-Store Queue)** 细化为带有**动态依赖追踪（独热码掩码）**和**幂等性分流**的结构，是迈向高性能核心的标志。
-
-关于你的提问："还有什么遗漏？"，作为教授，我发现你在**数据路径的最终闭环**上漏掉了两个关键细节：
-1.  **数据裁剪与对齐器 (Data Slicer/Aligner)**：Cache 返回的是 512-bit 宽行。必须有人根据 PA 的低位和 `memWidth` 将其切成 8/16/32 位，并根据 `lsuSign` 执行符号扩展。这通常在 LSU 的输出端。
-2.  **Store 的物理写使能**：SQ 条目只有在收到 **ROB Commit** 信号后，才能向 Cache 发出写请求。
-
-下面我为你整理了详实的模块文档。
-
-### 4.5 AGU
+### 4.5 LSQ (Load Store Queue)
 
 #### 4.5.1 职责
-*   **物理本质**：一个专用的 32 位加法器。
-*   **功能**：接收从 RS/PRF 发射的操作数（Base）和指令自带的立即数（Offset），计算出虚拟地址（VA）。
-
-#### 4.5.2 接口定义
-*   **Input**: `base_addr` (32 bits), `offset` (32 bits), `rob_id` (Tag).
-*   **Output**: `va` (32 bits), `rob_id`.
-
-### 4.6 PMAChecker (Physical Memory Attributes 检查器)
-
-*   **职责**: 在地址翻译完成后，根据物理地址（PA）判定该内存区域的固有物理属性。
-*   **输入**: `pa` (34 bits)。
-*   **输出**: `isIO` (Bool)。
-*   **内部逻辑**：单周期组合逻辑
-    1.  **PMA 表**：预定义一张物理地址到 PMA 属性的映射表（可编程或硬编码）。
-    2.  **地址匹配**：根据输入的 PA，查找对应的 PMA 条目。
-    3.  **属性输出**：输出该地址对应的 PMA 属性。
-    > *注意*: 实现中将 PMA 属性简化为 I/O 或主存——前者不幂等，不可乱序，不可缓存；后者幂等，可乱序，可缓存。
-
-### 4.7 LSU (Load Store Unit)
-
-#### 4.7.1 职责
 管理 Load/Store 指令的发射与完成，确保乱序执行环境下的内存一致性与正确性。
 
-#### 4.7.2 维护状态
-*   **LQ (Load Queue)**: 8 项，记录在途 Load，每条指令记录如下信息：
-    *   `Opcode`, `memWidth`, `rd`, `rob_id`, `branch_mask`, `epoch`, `privMode`。
-    *   `VA` (计算后的虚拟地址)。
-    *   `hasTranslate`, `PA`, `PMA`, `Exceptions` (翻译完成以及翻译结果)。
+#### 4.5.2 维护状态
+*   **LQ (Load Queue)**: 8 项，记录在途 Load 指令，每个 Entry 记录如下信息：
+    *   `memWidth`, `rd`, `robId`, `branchMask`, `epoch`, `privMode`, `rs1Tag`, `rs1Ready`。
+    *   `PAReady` `PA` (计算并检验后返回的物理地址)。
+    *   `Exceptions` (同时可能返回的异常)。
     *   `storeMask` (独热码形式，标记依赖的 Store)。
-    *   `isIO` (Bool，标记是否为 IO 部分 Load)。
 *   **SQ (Store Queue)**: 8 项，记录在途 Store，每条指令记录如下信息：
-    *   `Opcode`, `memWidth`, `rd`, `rob_id`, `branch_mask`, `epoch`, `privMode`。
-    *   `VA` (计算后的虚拟地址)。
-    *   `hasTranslate`, `PA`, `PMA`, `Exceptions` (翻译完成以及翻译结果)。
-    *   `data` (Store 数据)。
-    *   `dataReady` (Bool，标记数据是否已准备好)。
-    *   `isIO` (Bool，标记是否为 IO 部分 Store)。
+    *   `memWidth`, `rd`, `robId`, `branchMask`, `epoch`, `privMode`, `rs1Tag`, `rs1Ready`, `rs2Tag`, `rs2Ready`。
+    *   `PAReady` `PA` (计算并检验后返回的物理地址)。
+    *   `Exceptions` (同时可能返回的异常)。
 
-#### 4.7.2 接口定义
+#### 4.5.3 接口定义
 *   **输入**:
-    *   `dispatch_bus`: `Opcode`, `memWidth`, `rd`, `rob_id`, `branch_mask`, `epoch`.
-    *   来自 AGU 的 `VA`。
-    *   来自 MMU 与 PMAChecker 翻译出的 `PA`, `PMA`, `Exceptions` (Page Fault)。
-    *   来自 ROB 的 `{robid, robCommit}`: 指令退休信号（通知 Store 真正写内存或IO load 真正读内存）。
+    *   `LSUdispatch`: `Opcode`, `memWidth`, `rd`, `robId`, `branchMask`, `epoch`.
+    *   来自 AGU & PMP 的 `PA` 和 `Exception`。
+    *   来自 ROB 的 `{robId, robCommit}`: 指令退休信号（通知 Store 真正写内存或IO load 真正读内存）。
     *   监听 CDB，获取操作数。
-    *   来自 BRU 的 `global_flush` 与 `branch_kill_mask`。
+    *   来自 BRU 的 `globalFlush` 与 `branchKillMask`。
 *   **输出**:
-    *   向 MMU 发送 `VA`，向 PMAChecker 发送 `PA`。
+    *   向 AGU & PMP 发送地址生成请求。
     *   向 Cache 发送 `cacheReq`: `PA`, `Data`, `MemContext`。
     *   向 CDB 发送 Load 结果或指令就绪信号。
 
-#### 4.7.3 内部逻辑
+#### 4.5.4 内部逻辑
 
-*   **依赖追踪**：每当 Load 计算出 PA 且不为 IO Load 时，拷贝当前 SQ 中有效，PA 尚未计算或与 Load 重复的对应位作为 `storeMask`。当 Store 计算出 PA 后，广播 `PA + SQ_Index`，LQ 中所有 `store_mask` 对应位为 1 的 Load 立即进行地址比对。若不冲突，Load 将该位清零；若冲突，Load 保持该位，并标记 `is_forwarding = 1`。当 `store_mask === 0` 且 `PMA.is_io === 0` 时，Load 指令被允许发向 Cache。
+*   **依赖追踪**：每当 Load 计算出 PA 且不为 IO Load 时，拷贝当前 SQ 中有效，PA 尚未计算或与 Load 重复的对应位作为 `storeMask`。当 Store 计算出 PA 后，广播 `PA + sqIndex`，LQ 中所有 `storeMask` 对应位为 1 的 Load 立即进行地址比对。若不冲突，Load 将该位清零；若冲突，Load 保持该位，并标记 `isForwarding = 1`。当 `storeMask === 0` 且 `isIO === 0` 时，Load 指令被允许发向 Cache。
 
 *   **Store 数据准备**：Store 指令在发射时仅分配 SQ 条目，等待 CDB 上数据到达后填充 `data` 并标记 `dataReady = 1`。只有当 `dataReady = 1`，`PA` 已计算完成且该指令位于队头后，Store 会向 CDB 发出就绪信号，而 ROB 会在其到达队头后返回信号，该 `ack` 信号到达后 store 才被允许发向 Cache。
-  
-*   **IO Load 处理**：当 Load 被标记为 IO Load 时，忽略 `store_mask`，直接等待 ROB 队头执行信号后发起 Cache 访问，与 store 的处理方式类似，但需要在向 CDB 广播时给出自身是否为 IO 的信息。
 
+*   **IO Load 处理**：当 Load 被标记为 IO Load 时，忽略 `storeMask`，直接等待 ROB 队头执行信号后发起 Cache 访问，与 store 的处理方式类似，但需要在向 CDB 广播时给出自身是否为 IO 的信息。
 
 *   **冲刷处理**：
     *   **Global Flush**: 清空 LQ 和 SQ。
-    *   **Branch Kill**: 根据指令携带的 `branch_mask` 执行 `valid &= ~kill`。
+    *   **Branch Kill**: 根据指令携带的 `branchMask` 执行 `valid &= ~kill`。
 
-## 5. 总结：MemorySystem Top
+### 4.6 MemorySystem Top
 
+#### 4.6.1 职责
+封装整个内存系统，对外提供简洁的接口。内部包含 I-Cache、D-Cache、AXIArbiter、MainMemory、LSU（包含 LQ、SQ、AGU & PMP）等子模块。
+
+#### 4.6.2 接口定义
 封装后的 `MemorySystem` 对外暴露极其简洁的接口：
 
 ```scala
 class MemorySystemIO extends Bundle {
   // 1. 指令取指接口
   val if_req = Flipped(Decoupled(new FetchReq))
-  val if_resp= Decoupled(new FetchResp) // 含指令数据 + 异常
+  val if_resp = Decoupled(new FetchResp) // 含指令数据 + 异常
 
-  // 2. 数据访存接口 (LSU 内部连接，此处展示逻辑)
-  // ...
+  // 2. LSU 接口（使用 LSUDispatch）
+  val lsu_dispatch = Flipped(Decoupled(new LSUDispatch))
+  val lsu_agu_resp = Decoupled(new Bundle {
+    val pa = UInt(32.W) // 物理地址
+    val exception = new Exception // 异常包
+    val ctx = new MemContext // 内存上下文
+  })
+  val lsu_cache_req = Flipped(Decoupled(new LSUCacheReq))
+  val lsu_cache_resp = Decoupled(new LSUCacheResp)
+  val lsu_commit = Input(new LSUCommit)
+  val lsu_cdb = Output(new LSUCDBMessage)
 
   // 3. 全局控制
   val sfence = Input(new SFenceReq)
-  val csr    = Input(new CSRState) // satp, status, pmp
-  val flush  = Input(new GlobalFlush)
+  val csr = Input(new Bundle {
+    val pmp = UInt(128.W) // PMP 配置 (简化版)
+  })
+  val flush = Input(new Bundle {
+    val global = Bool() // 全局冲刷信号
+    val branchKill = UInt(4.W) // 分支冲刷掩码
+  })
 }
 ```
+
+#### 4.6.4 数据流
+
+##### 4.6.4.1 指令取指流程
+1. **Fetcher → I-Cache**：发送 `FetchReq`（包含 PC、上下文信息）
+2. **I-Cache**：
+   - 检查 Cache，若命中直接返回
+   - 若 Miss，通过 AXIArbiter 请求 MainMemory
+3. **I-Cache → Fetcher**：返回 `FetchResp`（包含指令数据、上下文、异常）
+
+##### 4.6.4.2 数据访存流程
+1. **Dispatch → LSU**：发送 `LSUDispatch`（包含操作码、位宽、数据包、robId、分支掩码、特权级）
+2. **LSU → AGU&PMP**：
+   - 发送地址生成请求（baseAddr、offset、memWidth、memOp、privMode、ctx）
+   - 接收物理地址、异常、上下文
+3. **LSU → D-Cache**：
+   - 发送 Cache 请求（PA、isWrite、data、strb、ctx）
+   - 接收 Cache 响应（data、ctx、exception）
+4. **LSU → CDB**：发送 `LSUCDBMessage`（robId、phyRd、data、isIO、exception）
+
+##### 4.6.4.3 全局控制流程
+1. **SFENCE.VMA**：ROB 发送 `SFenceReq`，清空相关缓存
+2. **FENCE.I**：ROB 发送信号，I-Cache 执行脏行清空
+3. **Global Flush**：CSRsUnit 发送信号，清空所有 Cache 和队列
+4. **Branch Flush**：BRU 发送信号，根据分支掩码清除对应指令
+
+#### 4.6.5 时序说明
+*   **I-Cache**：2 周期流水线（Tag 查找 + 数据返回）
+*   **D-Cache**：2 周期流水线（Tag 查找 + 数据返回）
+*   **AGU&PMP**：1 周期组合逻辑
+*   **MainMemory**：可配置延迟（默认 10 周期）
+*   **LSU**：Load 指令 2-4 周期（AGU + Cache），Store 指令等待提交后执行

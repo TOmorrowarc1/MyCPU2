@@ -424,7 +424,6 @@ class MemContext extends Bundle with CPUConfig {
   val epoch = EpochW // 纪元标记 (用于逻辑撤销)
   val branchMask = SnapshotMask // 分支掩码 (用于分支冲刷)
   val robId = RobTag // ROB 条目 ID
-  val privMode = PrivMode() // 特权级模式
 }
 
 // 取指请求 (Fetcher -> I-Cache)
@@ -440,33 +439,9 @@ class FetchResp extends Bundle with CPUConfig {
   val exception = new Exception // 访问异常
 }
 
-// 6.3 MMU 接口 (Memory Management Unit)
-
-// MMU 请求 (LSU -> MMU)
-class MMUReq extends Bundle with CPUConfig {
-  val va = UInt(32.W) // 待翻译的虚拟地址
-  val memOp = LSUOp() // 访问类型 (Load / Store)
-  val memWidth = LSUWidth() // 访问位宽 (B / H / W)
-  val ctx = new MemContext // 上下文信息
-}
-
-// MMU 响应 (MMU -> LSU)
-class MMUResp extends Bundle with CPUConfig {
-  val pa = UInt(34.W) // 翻译后的物理地址 (Sv32 输出为 34 位)
-  val exception = new Exception // 翻译异常 (Page Fault / Access Fault)
-  val ctx = new MemContext // 原样带回的上下文
-}
-
-// SFENCE.VMA 请求 (ROB -> MMU)
-class SFenceReq extends Bundle {
-  val rs1 = UInt(5.W) // rs1 寄存器号 (用于选择性刷新)
-  val rs2 = UInt(5.W) // rs2 寄存器号 (用于 ASID 匹配)
-  val valid = Bool() // 请求有效信号
-}
-
 // 6.4 Cache 接口
 
-// Cache 请求 (PTW/LSU/Fetcher -> Cache)
+// Cache 请求 (LSU/Fetcher -> Cache)
 class CacheReq extends Bundle with CPUConfig {
   val addr = UInt(32.W) // 物理地址
   val isWrite = Bool() // 写操作标志
@@ -475,7 +450,7 @@ class CacheReq extends Bundle with CPUConfig {
   val ctx = new MemContext // 上下文信息
 }
 
-// Cache 响应 (Cache -> PTW/LSU/Fetcher)
+// Cache 响应 (Cache -> LSU/Fetcher)
 class CacheResp extends Bundle with CPUConfig {
   val data = UInt(512.W) // 读数据
   val ctx = new MemContext // 回传的上下文
@@ -489,19 +464,23 @@ class CacheWriteback extends Bundle with CPUConfig {
   val ctx = new MemContext // 上下文信息
 }
 
-// 6.5 AGU 接口 (Address Generation Unit)
+// 6.5 AGU & PMP 接口 (Address Generation Unit & Physical Memory Protection)
 
-// AGU 请求 (RS -> AGU)
+// AGU 请求 (LSU -> AGU)
 class AGUReq extends Bundle with CPUConfig {
   val baseAddr = DataW // 基地址
   val offset = DataW // 偏移量 (立即数)
-  val robId = RobTag // ROB 条目 ID
+  val memWidth = LSUWidth() // 访存位宽
+  val memOp = LSUOp() // 访存类型 (Load/Store)
+  val privMode = PrivMode() // 特权级
+  val ctx = new MemContext // 内存上下文
 }
 
 // AGU 响应 (AGU -> LSU)
 class AGUResp extends Bundle with CPUConfig {
-  val va = UInt(32.W) // 计算出的虚拟地址
-  val robId = RobTag // ROB 条目 ID
+  val pa = UInt(32.W) // 计算出的物理地址
+  val exception = new Exception // 异常包（对齐异常或访问异常）
+  val ctx = new MemContext // 原样带回的内存上下文
 }
 
 // 6.6 PMA 检查器接口 (Physical Memory Attributes Checker)
@@ -601,15 +580,14 @@ class MemorySystemIO extends Bundle with CPUConfig {
   val lsu_dispatch = Flipped(Decoupled(new LSUDispatch))
   val lsu_agu_req = Flipped(Decoupled(new AGUReq))
   val lsu_agu_resp = Decoupled(new AGUResp)
-  val lsu_mmu_req = Flipped(Decoupled(new MMUReq))
-  val lsu_mmu_resp = Decoupled(new MMUResp)
+  val lsu_cache_req = Flipped(Decoupled(new LSUCacheReq))
+  val lsu_cache_resp = Decoupled(new LSUCacheResp)
   val lsu_commit = Input(new LSUCommit)
   val lsu_cdb = Output(new LSUCDBMessage)
 
   // 3. 全局控制
-  val sfence = Input(new SFenceReq)
+  val sfence = Input(Bool()) // SFENCE.VMA 信号
   val csr = Input(new Bundle {
-    val satp = UInt(32.W) // 包含 Mode (Sv32) 与 PPN (根页表基址)
     val pmp = UInt(128.W) // PMP 配置 (简化版)
   })
   val flush = Input(new Bundle {
