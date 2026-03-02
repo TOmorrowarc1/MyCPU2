@@ -4,7 +4,18 @@
 
 MainMemory 模块模拟物理内存的行为，提供高延迟、宽带宽的内存访问接口，支持仿真文件的预加载，通过 AXI4 协议与上层缓存系统进行通信。
 
-MainMemory 是 CPU 内存层次结构的最后一层，位于 AXIArbiter 下方，直接响应来自 I-Cache 和 D-Cache 的内存访问请求。
+### 1.1 目的和作用
+
+MainMemory 在 CPU 中发挥以下关键作用：
+
+- **内存层次结构定位**：作为 CPU 内存层次结构的最后一层，位于 AXIArbiter 下方，直接响应来自 I-Cache 和 D-Cache 的内存访问请求。
+- **与 AXIArbiter/Cache 的关系**：通过 Wide-AXI4 协议与 AXIArbiter 通信，AXIArbiter 作为主设备（Master），MainMemory 作为从设备（Slave）。当 Cache 发生 Miss 时，请求通过 AXIArbiter 仲裁后传递到 MainMemory。
+- **核心功能说明**：
+  - 提供高延迟、宽带宽的内存访问接口（512-bit 数据宽度）
+  - 支持仿真文件的预加载（如 kernel.hex）
+  - 通过 AXI4 协议与上层缓存系统进行通信
+  - 维护内存一致性（通过 epoch 信息传递）
+  - 支持读操作和写操作，采用读优先策略
 
 ## 2. 模块接口
 
@@ -44,7 +55,11 @@ MainMemory 作为 AXI4 从设备，接收来自 AXIArbiter 的请求。接口使
 | `w.bits.strb` | `UInt(64.W)` | 字节写掩码（64 bytes -> 64 bits） |
 | `w.bits.last` | `Bool` | Burst 结束标志，宽总线一次传完 |
 
-#### 2.1.4 读响应通道（R Channel - MainMemory 输出）
+### 2.2 输出接口
+
+MainMemory 通过以下通道向 AXIArbiter 返回响应数据。
+
+#### 2.2.1 读响应通道（R Channel）
 
 | 信号 | 类型 | 描述 |
 |------|------|------|
@@ -55,7 +70,7 @@ MainMemory 作为 AXI4 从设备，接收来自 AXIArbiter 的请求。接口使
 | `r.bits.last` | `Bool` | Burst 结束标志（宽总线恒为 true） |
 | `r.bits.user.epoch` | `UInt(2.W)` | 纪元信息（原样回传） |
 
-#### 2.1.5 写响应通道（B Channel - MainMemory 输出）
+#### 2.2.2 写响应通道（B Channel）
 
 | 信号 | 类型 | 描述 |
 |------|------|------|
@@ -64,7 +79,7 @@ MainMemory 作为 AXI4 从设备，接收来自 AXIArbiter 的请求。接口使
 | `b.bits.id` | `AXIID` | 事务 ID（回传请求的 ID） |
 | `b.bits.user.epoch` | `UInt(2.W)` | 纪元信息（原样回传） |
 
-### 2.2 Chisel 接口定义
+### 2.3 Chisel 接口定义
 
 MainMemory 模块的接口定义在 [`Protocol.scala`](../../../src/main/scala/cpu/Protocol.scala) 中，使用以下结构体：
 
