@@ -84,12 +84,12 @@ MainMemory 通过以下通道向 AXIArbiter 返回响应数据。
 MainMemory 模块的接口定义在 [`Protocol.scala`](../../../src/main/scala/cpu/Protocol.scala) 中，使用以下结构体：
 
 ```scala
-// AXI 上下文元数据（在 Protocol.scala 中定义）
+// AXI 上下文元数据（在 Protocol.scala 第 376-378 行定义）
 class AXIContext extends Bundle with CPUConfig {
   val epoch = UInt(2.W)  // 纪元信息，用于内存一致性维护
 }
 
-// Wide-AXI4 总线接口（在 Protocol.scala 中定义）
+// Wide-AXI4 总线接口（在 Protocol.scala 第 381-415 行定义）
 class WideAXI4Bundle extends Bundle with CPUConfig {
   // --- 读路径 ---
   val ar = Decoupled(new Bundle {
