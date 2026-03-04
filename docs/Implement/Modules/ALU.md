@@ -44,8 +44,9 @@ ALU 从 CPU 中的多个源接收输入，使用 [`AluDrivenPacket`](../../src/m
 
 | 信号 | 源 | 描述 |
 |------|-----|------|
-| `GlobalFlush` | ROB | 全局冲刷信号，用于丢弃所有进行中的操作 |
-| `BranchFlush` | BRU | 分支预测错误冲刷信号 |
+| `globalFlush` | ROB | 全局冲刷信号，用于丢弃所有进行中的操作 |
+| `branchFlush` | BRU | 分支预测错误冲刷信号 |
+| `branchOH` | BRU | 分支快照掩码（one-hot 编码），用于标识需要冲刷的快照 |
 
 ### 2.2 输出接口
 

@@ -75,13 +75,14 @@ class SModeCSRs extends Bundle with CPUConfig {
   // 监督者状态寄存器
   // val sstatus = UInt(32.W)      // 监督者状态寄存器（mstatus 子集）
   // val sie = UInt(32.W)          // 监督者中断使能寄存器（mie 子集）
-  
+
   // 监督者 Trap 处理寄存器
   val sepc = UInt(32.W)         // 监督者异常程序计数器
   val scause = UInt(32.W)       // 监督者异常原因
   val stval = UInt(32.W)       // 监督者陷阱值
   val stvec = UInt(32.W)       // 监督者陷阱向量基地址
   val sscratch = UInt(32.W)     // 监督者临时寄存器
+  val satp = UInt(32.W)         // 地址翻译和保护: Not Implemented
 }
 ```
 

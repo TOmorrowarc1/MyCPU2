@@ -129,7 +129,7 @@ class ZicsrU extends Module with CPUConfig {
     val zicsrReq = Flipped(Decoupled(new ZicsrDispatch))
 
     // 向 PRF 的读请求
-    val prfReq = Decoupled(new PrfReadReq)
+    val prfReq = Decoupled(new PrfReadPacket)
     // 来自 PRF 的回复数据
     val prfData = Flipped(Decoupled(new PrfReadData))
 
@@ -143,7 +143,10 @@ class ZicsrU extends Module with CPUConfig {
     val commitReady = Input(Bool())
 
     // 输出到 CDB
-    val CDB = Decoupled(new CDBMessage)
+    val cdb = Decoupled(new CDBMessage)
+    val cdbIn = Flipped(Decoupled(new Bundle {
+      val phyRd = PhyTag
+    }))
 
     // 分支冲刷信号
     val globalFlush = Input(Bool())
@@ -280,9 +283,9 @@ io.prfData.ready := canRead
 io.csrReadReq.bits.csrAddr := instructionReg.csrAddr
 io.csrReadReq.bits.privMode := instructionReg.privMode
 
-// 从 PRF 读取 RS1 数据
-io.prfReq.bits.raddr1 := instructionReg.data.src1Tag
-io.prfReq.bits.raddr2 := instructionReg.data.src2Tag
+  // 从 PRF 读取 RS1 数据
+  io.prfReq.bits.raddr1 := instructionReg.data.src1Tag
+  io.prfReq.bits.raddr2 := 0.U // CSR 指令不需要第二个操作数
 
 val oldValue = Mux(canRead, io.csrReadResp.data, 0.U)
 // 根据信息计算 CSR 之外的操作数
@@ -362,9 +365,13 @@ when(canWrite) {
 // CDB 输出（使用 CDBMessage 结构体）
 io.cdb.valid := boardcast
 io.cdb.bits.robId := instructionReg.robId
-io.cdb.bits.phyRd := Mux(canWrite, instructionReg.phyRd, 0.U)
-io.cdb.bits.data := Mux(canWrite, resultReg, 0.U)
-io.cdb.bits.hasSideEffect := false.b
+io.cdb.bits.phyRd := Mux(
+  state === ZicsrState.WAIT_CDB2,
+  instructionReg.phyRd,
+  0.U
+)
+io.cdb.bits.data := Mux(state === ZicsrState.WAIT_CDB2, csrRdataReg, 0.U)
+io.cdb.bits.hasSideEffect := false.B
 io.cdb.bits.exception := exceptionReg
 ```
 

@@ -7,7 +7,7 @@ ROB 是乱序执行核心中的"指令提交中心"和"架构状态维护者"，
 1.  **维护指令顺序（In-order Commit）**：确保指令虽然乱序执行，但严格按照程序序（Program Order）退休，从而维护精确异常（Precise Exception）。
 2.  **管理物理寄存器生命周期**：在指令提交时，通知 RAT 回收被覆盖的旧物理寄存器（`preRd`）到 Free List。
 3.  **异常与中断的终审**：作为异常处理的唯一入口，仅当异常指令到达队列头部时才触发 Trap 流程，防止推断执行的错误触发异常。
-4.  **序列化指令控制**：处理 `Store`、`CSR`、`MRET/SRET`、`SFENCE.VMA`、`FENCE.I` 等具有副作用或需要序列化的指令，协调 LSU 和 CSRsUnit 进行原子操作。
+4.  **序列化指令控制**：处理 `Store`、`CSR`、`MRET/SRET`、`FENCE.I` 等具有副作用或需要序列化的指令，协调 LSU 和 CSRsUnit 进行原子操作。
 5.  **冲刷与重定向**：产生 `GlobalFlush` 信号，管理 `IEpoch`（指令纪元）和 `DEpoch`（数据纪元），并向 Fetcher 提供重定向 PC。
 6.  **全局控制信息维护**：管理 `CSRPending` 信号，标记 CSR 指令或某些改变 CSR 状态指令正在提交中以阻塞前端取指。
 
@@ -52,7 +52,6 @@ ROB 是乱序执行核心中的"指令提交中心"和"架构状态维护者"，
 | `sret`             | CSRsUnit     | `Output(Bool())`           | SRET 指令提交信号                                               |
 | **内存同步**       |              |                            |                                                                 |
 | `fenceI`           | Cache        | `Output(Bool())`           | FENCE.I 指令提交信号，用于 I-Cache 同步                         |
-| `sfenceVma`        | MMU          | `Output(new SFenceReq)`    | SFENCE.VMA 指令提交信号，用于 TLB 刷新                          |
 
 ---
 
@@ -109,7 +108,7 @@ class ROBEntry extends Bundle with CPUConfig {
 - `dEpoch`: 仅在 `globalFlush` 时更新
 
 **CSRPending 维护**:
-- 当 CSR 指令或 xRET 指令或 `FENCE`、`FENCE.I`、`SFENCE` 入队时，拉高 `CSRPending` 信号
+- 当 CSR 指令或 xRET 指令或 `FENCE`、`FENCE.I` 入队时，拉高 `CSRPending` 信号
 - 在这类指令提交时拉低该信号（由于阻塞取指一段时间内只有一条该类指令）
 
 ### 3. 队列维护
@@ -205,12 +204,6 @@ val commitState = RegInit(CommitState.s_IDLE)
   - 等待 CDB 返回信号
   - 收到信号后当周期执行正常退休流程
 
-- **SFENCE.VMA 指令** (`specialInstr === SpecialInstr.SFENCE`):
-  - 进入 `s_WAIT` 状态
-  - 拉高 `io.sfenceVma` 信号
-  - 等待 CDB 返回信号
-  - 收到信号后当周期执行正常退休流程
-
 **步骤 3: Retire**
 - 通知 RAT `Retire(archRd, phyRd, preRd)`：
   - `io.commitRAT.valid := true.B`
@@ -281,7 +274,6 @@ class ROB extends Module with CPUConfig {
     val mret = Output(Bool())
     val sret = Output(Bool())
     val fenceI = Output(Bool())
-    val sfenceVma = Output(Bool())
   })
 
   // ==================== 1. 状态定义 ====================
@@ -292,11 +284,10 @@ class ROB extends Module with CPUConfig {
   // 队列指针
   val robHead = RegInit(0.U(RobIdWidth.W))
   val robTail = RegInit(0.U(RobIdWidth.W))
-  val robCount = RegInit(0.U(RobIdWidth.W))
-  
+
   // 纪元寄存器
-  val iEpoch = RegInit(0.U(EpochW.W))
-  val dEpoch = RegInit(0.U(EpochW.W))
+  val iEpoch = RegInit(0.U(EpochWidth.W))
+  val dEpoch = RegInit(0.U(EpochWidth.W))
   
   // CSR 指令待处理标志
   val csrPending = RegInit(false.B)
@@ -385,7 +376,6 @@ class ROB extends Module with CPUConfig {
   io.mret := false.B
   io.sret := false.B
   io.fenceI := false.B
-  io.sfenceVma := false.B
   io.commitRAT.valid := false.B
   io.exception.valid := false.B
   
@@ -422,11 +412,6 @@ class ROB extends Module with CPUConfig {
           is(SpecialInstr.FENCEI) {
             commitState := CommitState.s_WAIT
             io.fenceI := true.B
-          }
-          // SFENCE.VMA 指令
-          is(SpecialInstr.SFENCE) {
-            commitState := CommitState.s_WAIT
-            io.sfenceVma := true.B
           }
           // WFI 指令（当作 NOP）
           is(SpecialInstr.WFI) {

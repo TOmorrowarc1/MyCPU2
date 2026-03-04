@@ -27,9 +27,9 @@
     *   **异常处理**：将 `Exceptions` 向 Dispatch 单元透传，但如果此时 `exception.valid` 已经为 1，则不向 RS 内传输信息，向 RAT 内请求 x0 即可。
     *   **阻塞逻辑**：若 ROB, RS, LSQ, 或 RAT Free List 满，拉低对 LSU（内部 I-Cache）的 `ready`；如果解析出指令属于 Zicsr 扩展或是 Privileged ISA，或 `CSRPending` 信号为 1，则拉高 `IFStall` 信号试图暂停取指，直到 CSR 指令完成（`CSRPending` 置 0）。
 *   **输出**：
-    *   向 RAT 发送 `{Data, IsBranch}` 请求。
-    *   向 ROB 发送 `{RobID, Exception, Prediction}`。
-    *   向 RS 发送 `{MinOps, Exceptions, RobID, Prediction}`。
+    *   向 RAT 发送 `RenameReq`（包含 `{Rs1, Rs2, Rd, IsBranch}`）。
+    *   向 ROB 发送 `ROBInitControl`（包含 `{PC, Prediction, Exception, SpecialInstr}`）。
+    *   向 RS 发送 `DispatchPacket`（包含 `{RobID, MicroOp, PC, Imm, CsrAddr, PrivMode, Prediction}`）。
     *   向 Fetcher 发送 `IFStall` 信号。
 
 ### 1.3 RAT (Register Alias Table)
@@ -46,8 +46,8 @@
     *   **正常回收**：将 ROB 提交阶段发回的 `PreRd` 回收进 Free List；将 BRU 传来的预测成功分支（SnapshotID 非 0，但 BranchFlush 为 0）对应的 Snapshot 回收。同时将 CDB 广播发回的 `Rd` 回收进 Ready List。
         > 以上内容中回收的含义为将 busy 位置 0，表示该物理资源可再分配使用。
 *   **输出**：
-    *   向 ROB 发送 `{LogicRd, PhyRd, PreRd, BranchMask}`。
-    *   向 RS 发送 `{Data, BranchMask}`。
+    *   向 ROB 发送 `ROBinitData`（包含 `{ArchRd, PhyRd, PhyOld, BranchMask}`）。
+    *   向 RS 发送 `RenameRes`（包含 `{PhyRs1, Rs1Ready, PhyRs2, Rs2Ready, PhyRd, SnapshotOH, BranchMask}`）。
 
 ## 2. Backend
 
@@ -55,26 +55,28 @@
 *   **组成**：由 Dispatcher、ALURS 与 BRURS 组成。
 *   **职责**：接收 Decoder 送入的控制方面信息与来自 RAT 的数据相关信息，dispatch 到各个执行单元。维护因数据冒险与结构冒险暂时无法执行的指令队列，其中 ALU 与 BRU 在对应 RS 中维护；Load/Store 指令由 LSU 自主维护，Zicsr 与其他特权级相关指令由 ZicsrU 维护，RS 模块只负责分派。
 *   **输入**：
-    *   来自 Decoder 的 `{MinOps, Exceptions, RobID, Prediction, PC, Imm, privMode}`。
-    *   来自 RAT 的 `{Data, BranchMask}`。
-    *   来自 CBD 的 `{ResultReg, data}`。
+    *   来自 Decoder 的 `DispatchPacket`（包含 `{MicroOp, RobID, Prediction, PC, Imm, CsrAddr, PrivMode}`）。
+    *   来自 RAT 的 `RenameRes`（包含 `{PhyRs1, Rs1Ready, PhyRs2, Rs2Ready, PhyRd, SnapshotOH, BranchMask}`）。
+    *   来自 CDB 的 `{PhyRd}`（用于唤醒依赖指令）。
     *   来自 ROB 的 `GlobalFlush`。
-    *   来自 BRU 的 `BranchFlush` 与 `BranchMask`。
+    *   来自 BRU 的 `BranchFlush` 与 `BranchOH`。
 *   **逻辑简述**：
     *   **接收并分派**：从 Decoder 接收 `{MinOps, Exceptions, RobID, Prediction}`，从 RAT 接收 `{Data, BranchMask}`，Dispatcher 利用 `MinOps` 中指令 opcode 进行分派，将信息发送到 4 个 EU 中的对应 RS 或 Queue。
     *   **监听**：在对应 RS 中存储指令控制与数据有关信息。时刻比对 CBD 上的 `ResultReg`。若匹配则将对应数据置为 valid。
     *   **发射**：RS 使用 Waiting Pool，当一条指令的所有操作数都 valid ，即该指令 valid 且对应 EU ready 时将最早的指令需要的源寄存器值从 PRF 中取出，发送到 EU 中求取结果。
     *   **冲刷**：如果 ROB 将 `GlobalFlush` 信号拉高，则立刻通过将 busy 位置 0 方式冲刷所有指令。如果 BRU 拉高 `BranchFlush` 则根据 `BranchMask` 进行位运算，找出依赖于对应分支指令并清理。
 *   **输出**：
-    *   向 PRF 发送 `{SourceReg1, SourceReg2}`。
-    *   向 EU 发送对应 `{Opcode, Data, RobID, Prediction}`。   
+    *   向 PRF 发送 `{Raddr1, Raddr2}`（物理寄存器读取请求）。
+    *   向 ALU 发送 `AluReq`（包含 `{ALUOp, Meta, Data}`）。
+    *   向 BRU 发送 `BruReq`（包含 `{BRUOp, SnapshotOH, Prediction, Meta, Data}`）。
+    *   向 LSU 发送 `LSUDispatch`（包含 `{Opcode, MemWidth, MemSign, Data, PhyRd, RobID, BranchMask, PrivMode}`）。
+    *   向 ZicsrU 发送 `ZicsrDispatch`（包含 `{ZicsrOp, Data, CsrAddr, RobID, PhyRd, BranchMask, PrivMode}`）。
 
 ### 2.2 ALU (Arithmetic Logic Unit)
 *   **职责**：执行整数算术与逻辑运算。
 *   **输入**：
-    *   来自 RS 的 `{ALUOp, Op1Sel, Op2Sel, Imm, PC, RobID}`。
-    *   来自 PRF 的 `{ReadData1, ReadData2}`。
-    *   来自 ROB/BRU 的冲刷信号。
+    *   来自 RS 的 `AluDrivenPacket`（包含 `{ALUOp, Op1Sel, Op2Sel, Imm, PC, RobID, PhyRd, BranchMask}` 和来自 PRF 的 `{ReadData1, ReadData2}`）。
+    *   来自 ROB/BRU 的冲刷信号（`GlobalFlush`, `BranchFlush`, `BranchOH`）。
 *   **逻辑简述**：
     *   **操作数选择**：根据 `Op1Sel/Op2Sel` 在 `ReadData`、`PC`、`Imm`、`Zero` 之间进行 Mux 选择。
     *   **运算**：执行加减、移位、逻辑、比较等操作。
@@ -93,8 +95,8 @@
         *   **预测正确**：生成 `BranchResolve` 信号（不冲刷，只清除 Mask）。
         *   **预测错误**：生成 `BranchFlush` 信号，携带 `RedirectPC` 和该指令对应的 `BranchMask`（用于定位）。
 *   **输出**：
-    *   **全局专线**：完成判定后先存入寄存器，下一个周期向 Fetcher/RAT/ROB/RS 广播 `{BranchFlush, RedirectPC, snapshotId}`。
-    *   **CBD 接口**：向 CBD 发送 `{RobID, Result(无意义), Exception}` 以便 ROB 更新状态。
+    *   **全局专线**：完成判定后先存入寄存器，下一个周期向 Fetcher/RAT/ROB/RS 广播 `{BranchFlush, RedirectPC, branchOH}`（branchOH 为独热码）。
+    *   **CBD 接口**：向 CBD 发送 `{RobID, Result(返回地址), Exception}` 以便 ROB 更新状态。
 
 ### 2.4 ZICSRU (Zicsr Instructions Unit)
 *   **职责**：执行 CSR 读写指令（读旧值、算新值、如 Store 一般一段时间后写入新值）。
@@ -108,7 +110,9 @@
     *   **算操作**：根据 `CSROp` (RW/RS/RC) 和 `RS1/Imm` 计算 `NewValue`。
     *   **暂停**：由于 CSR 指令在 ROB 头部序列化执行，ZICSRU 的写入上只在 ROB 发出信号时才工作。
 *   **输出**：
-    *   向 CBD 发送 `{RobID, Result(OldValue), Exception}` (用于写回 `rd`)。
+    *   向 CBD 发送两次 `{RobID, Result, Exception}`：
+        *   第一次广播（读结果）：`RobID` 为指令 ID，`Result` 为 `OldValue`（CSR 旧值），用于写回 `rd`。
+        *   第二次广播（写结果）：`RobID` 为 0（无意义），`Result` 为 0（无意义），用于确认 CSR 写入完成。
 
 ### 2.5 LSU (Load Store Unit) - MemorySystem 接口
 *   **组成**：LSQ (Load Queue, Store Queue), AGU & PMP (地址生成与权限检查)。
@@ -141,29 +145,30 @@
 ### 2.6 CBD (Common Bus Data)
 *   **职责**：多对一仲裁（ALU/BRU/LSU/ZICSRU $\rightarrow$ 总线），将通过仲裁的指令结果广播到 RS、PRF 与 ROB。
 *   **输入**：
-    *   来自 ALU、BRU、LSU、ZICSRU 的 `{ResultRd, data, RobID, Exception}`。
+    *   来自 ALU、BRU、LSU、ZICSRU 的 `CDBMessage`（包含 `{RobID, PhyRd, Data, HasSideEffect, Exception}`）。
     *   来自 ROB 的 `GlobalFlush`。
     *   来自 BRU 的 `BranchFlush`。
 *   **逻辑简述**：
     *   **仲裁**：当多个 EU 同时请求总线时，按照预设优先级（ZICSRU > LSU > BRU > ALU）进行仲裁，选出一个 EU 的结果进行广播。
     *   **冲刷**：若 ROB 拉高 `GlobalFlush` 或 BRU 拉高 `BranchFlush`，则当前周期的总线不进行广播。
-*   **输出**：`{ResultRd, data, RobID, Exception}`。
+*   **输出**：`CDBMessage`（包含 `{RobID, PhyRd, Data, HasSideEffect, Exception}`）。
   
 ## 3. 状态及其维护
 
 ### 3.1 PRF (Physical Register File)
 *   **职责**：储存数据的物理寄存器。
-*   **写端口**：连接 **CBD**，监听 `ResultRd` 与 `Data` ，若不为 x0 则写入数据。
-*   **读端口**：连接 **RS 的发射端**，在 Issue 阶段接受源寄存器编号，读取出对应值并直接将对应值输入 EU 进行计算（e.g. `io.rdata1 := regs[io.rs1]`）。
+*   **写端口**：连接 **CBD**，监听 `PhyRd` 与 `Data` ，若不为 x0 则写入数据。
+*   **读端口**：连接 **RS 的发射端**，在 Issue 阶段接受源寄存器编号，读取出对应值并返回 `PrfReadData`（包含 `{Rdata1, Rdata2}`）。
   > 为避免端口过多，我们为 ALU，BRU，LSU 分别配备一份寄存器，每个 PRF 模块固定一个读端口一个写端口，而内部寄存器堆需要两个读端口一个写端口。
 
 ### 3.2 ROB (Reorder Buffer)
 *   **职责**：指令生命周期与全局控制信息管理者，异常处理中心，架构状态更新者。
 *   **输入**：
-    *   Decoder 与 RAT : 。新入队指令的 `{pc, Exception, Prediction, isSpecialInstr}` 与 `{LogicRd, PhyRd, PreRd, BranchMask}`。
-    *   `CBD`: 标记指令完成或待机，并携带物理目标寄存器结果的 `{RobID, Exception, phyRd, data}`。
-    *   `BRU`: 接收 BRU 计算完成的 `{snapshotId, branchFlush, redirectPC}`。
-    *   `globalFlush` 信号：来自 CSRsUnit 的全局冲刷信号，代表异常或中断处理。
+    *   来自 Decoder 的 `ROBInitControl`（包含 `{pc, Prediction, Exception, SpecialInstr}`）。
+    *   来自 RAT 的 `ROBinitData`（包含 `{ArchRd, PhyRd, PhyOld, BranchMask}`）。
+    *   来自 CDB 的 `CDBMessage`（包含 `{RobID, PhyRd, Data, HasSideEffect, Exception}`）。
+    *   来自 BRU 的 `{BranchOH, BranchFlush, BranchRobId, RedirectPC}`。
+    *   来自 CSRsUnit 的 `GlobalFlush` 信号。
 *   **逻辑简述**：
     *   **队列维护**：维护一个最大长度确定的循环队列，包含队头 `robHead` 与队尾 `robTail`，每个 Entry 包含如下内容：
         * 状态位：`busy`, `completed` 对应是否为空与是否完成。
@@ -195,11 +200,11 @@
 *   **输出**：
     *   纪元信息：`IEpoch` `DEpoch`。
     *   取值暂停信息：`CSRPending`。
-    *   指令 Ack 信息：`storeEnable` `csrEnable`。
-    *   异常与 CSR 更新信息：`exception` `mret` `sret`。
-    *   内存部分更新信息：`fence.i` `sfence.vma`。
-    *   `RobTail`: 给 Decoder 用于分配 ID。
-    *   RAT 更新信息：`{commitArchRd, commitPhyRd, commitOldRd}`。
+    *   指令 Ack 信息：`StoreEnable` `CsrEnable`。
+    *   异常与 CSR 更新信息：`exception` `IsCSR` `mret` `sret`。
+    *   内存部分更新信息：`fenceI`。
+    *   `FreeRobID`: 给 Decoder 用于分配 ID。
+    *   RAT 更新信息：`CommitRAT`（包含 `{ArchRd, PhyRd, PreRd}`）。
 
 ### 3.3 CSRsUnit
 *   **职责**：物理 CSR 寄存器堆，实现 CSR 相关特权级逻辑，是 CPU 特权级管理的核心模块。
@@ -213,6 +218,7 @@
     *   **来自 ZICSRU 的读请求**：`{csrAddr, privMode}`。
     *   **来自 ZICSRU 的写请求**：`{csrAddr, privMode, data}`。
     *   **来自 ROB 的 Commit & Trap 信号**：`{exception(valid, cause, tval), pc, isCSR, mret, sret}`，用于异常处理，返回指令处理和 Zicsr 指令处理（触发全局更新）。
+    *   **来自 ROB 的 `PC` 信号**：用于 Trap 处理时保存 PC 到 mepc/sepc。
 *   **逻辑简述**：
     *   **CSR 读写检查逻辑**：
         *   **地址权限判定**：在 Decoder 中完成，CSR 剩余检查集中于地址对应寄存器存在与否以及 PMPRegs L 位类似的检查。
@@ -233,8 +239,8 @@
     *   **向 ZICSRU 提供 CSR 访问结果**：读取为 `{data, exception}`，包括读取的 CSR 数据和异常信息；写入为 `{exception}`，表示写入结果的异常信息。
     *   **向 Fetcher 提供当前 privMode**：用于指令取指时的特权级检查
     *   **向 Decoder 暴露当前 privMode**：用于指令解码时的特权级检查
-    *   **提供全局 flush 信号**：`{globalFlush(valid, pc)}`，用于异常，中断处理和 CSR/mret/sret 指令提交时的流水线冲刷。
-    *   **提供内存相关控制信息**：`{pmp 配置}`，用于内存系统的权限检查。
+    *   **提供全局 flush 信号**：`{GlobalFlush, GlobalFlushPC}`，用于异常，中断处理和 CSR/mret/sret 指令提交时的流水线冲刷。
+    *   **提供内存相关控制信息**：`{PmpConfig, PmpAddr}`，用于内存系统的权限检查。
 *   **实现要点**：
     *   **集中式状态管理**：整个 Unit 分为三个阶段，读取输入，计算，抉择 + 更新 + 输出，避免在多个 when 语句中分散处理 CSR 更新逻辑；分别计算由异常产生的结果，由中断产生的结果与 CSR 指令读写的结果，再**使用 MuxLookup** 选择更新源。
 

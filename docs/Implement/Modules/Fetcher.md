@@ -177,28 +177,27 @@ fetchException.tval := currentPC
 class Fetcher extends Module with CPUConfig {
   val io = IO(new Bundle {
     // 输入
-    val insEpoch = Input(UInt())
+    val insEpoch = Input(EpochW)
     val globalFlush = Input(Bool())
     val globalFlushPC = Input(AddrW)
     val branchFlush = Input(Bool())
     val branchFlushPC = Input(AddrW)
     val ifStall = Input(Bool())
     val privMode = Input(PrivMode())
-    val icache = Flipped(Decoupled(new IFetchPacket))
-    
+
     // 输出
     val icache = Decoupled(new IFetchPacket)
   })
-  
+
   // 内部状态
-  val nextPC = RegInit(0x80000000.U(32.W))
-  
+  val nextPC = RegInit(0x80000000L.U(AddrWidth.W))
+
   // 1. PC 选择逻辑
   val currentPC = MuxCase(nextPC, Seq(
     (io.globalFlush) -> io.globalFlushPC,
     (io.branchFlush) -> io.branchFlushPC
   ))
-  
+
   // 2. 异常检测与处理
   val fetchException = Wire(new Exception)
   fetchException.valid := currentPC(1,0) =/= 0.U
@@ -208,14 +207,14 @@ class Fetcher extends Module with CPUConfig {
   // 3. 分支预测
   val predict = Wire(new Prediction)
   predict := branchPredictModule.io.predict(currentPC)
-  
+
   // 4. 取指请求发起（使用 Decoupled）
   io.icache.valid := (!io.ifStall) || (io.globalFlush || io.branchFlush)
   io.icache.bits.pc := currentPC
   io.icache.bits.prediction := predict
   io.icache.bits.exception := fetchException
   io.icache.bits.privMode := io.privMode
-  
+
   // 5. NextPC 更新
   when (io.icache.fire) {
     nextPC := predict.targetPC
@@ -223,6 +222,6 @@ class Fetcher extends Module with CPUConfig {
   .otherwise {
     nextPC := currentPC
   }
-  
+
 }
 ```
