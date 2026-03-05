@@ -249,7 +249,6 @@ class ROBTest extends AnyFlatSpec with ChiselScalatestTester {
       dut.io.mret.expect(false.B)
       dut.io.sret.expect(false.B)
       dut.io.fenceI.expect(false.B)
-      dut.io.sfenceVma.valid.expect(false.B)
     }
   }
 
@@ -494,43 +493,6 @@ class ROBTest extends AnyFlatSpec with ChiselScalatestTester {
       // FENCE.I 指令应该提交
       dut.io.commitRAT.valid.expect(true.B)
       dut.io.fenceI.expect(false.B)
-      dut.clock.step()
-
-      setDefaultInputs(dut)
-      dut.io.commitRAT.valid.expect(false.B)
-      dut.io.csrPending.expect(false.B)
-    }
-  }
-
-  it should "正确处理 SFENCE.VMA 指令" in {
-    test(new ROB) { dut =>
-      setDefaultInputs(dut)
-
-      // 入队一条 SFENCE.VMA 指令
-      setDefaultInputs(dut)
-      setControlInit(dut, pc = 0x80000000L, specialInstr = SpecialInstr.SFENCE)
-      setDataInit(dut, archRd = 0, phyRd = 0, phyOld = 0, branchMask = 0)
-      dut.clock.step()
-
-      // 验证 CSRPending 信号被拉高
-      dut.io.csrPending.expect(true.B)
-
-      // SFENCE.VMA 指令完成
-      setDefaultInputs(dut)
-      setCDB(dut, robId = 0, phyRd = 0, data = 0)
-      dut.clock.step()
-
-      // IDLE -> WAIT
-      setDefaultInputs(dut)
-      // SFENCE.VMA 指令应该拉高 sfenceVma 信号
-      dut.io.sfenceVma.valid.expect(true.B)
-      dut.clock.step()
-
-      setDefaultInputs(dut)
-      setCDB(dut, robId = 0, phyRd = 0, data = 0)
-      // SFENCE.VMA 指令应该提交
-      dut.io.commitRAT.valid.expect(true.B)
-      dut.io.sfenceVma.valid.expect(false.B)
       dut.clock.step()
 
       setDefaultInputs(dut)

@@ -12,6 +12,7 @@
 
 Chisel 通过 **原型** 来定义 **硬件类型**，再通过工厂函数以类型实例为参数返回对应硬件实体。
 > e.g. `Wire(UInt(8.W))` ：创建一个 Wire 实体，其原型参考 `UInt(8.W)` 这个 Scala 对象。
+> 对于无符号整数字面量(Level 1)，使用 hex string 创建以防 Scala 自动解释成 Int 导致位宽不匹配：`"hFFFFFFFF".U`。
 
 ## Prototype I: Basic
 *   **`UInt(w.W)`**: 无符号整数。
@@ -61,7 +62,7 @@ alu_out := io.a + io.b
 | 函数 | 语法 | 说明 | 结果类型 |
 | :--- | :--- | :--- | :--- |
 | **`.pad(n)`** | `a.pad(n)` | 将信号扩展到总位宽 `n`。 | 同 `a` |
-| **`fill(n, b)`** | `Fill(n, b)` | 将 1-bit 信号 `b` 重复 `n` 次。 | `UInt` |
+| **`fill(n, b)`** | `Fill(Int, U(1.W))` | 将 1-bit 信号 `b` 重复 `n` 次。 | `UInt` |
 > SInt 扩展高位补符号位，而 UInt 扩展高位自动补 `0`。
 ```scala
 val imm12 = Wire(UInt(12.W))
@@ -69,6 +70,9 @@ val imm12 = Wire(UInt(12.W))
 val wrong = imm12.pad(32) 
 // 正确做法：符号扩展到 32 位
 val right = imm12.asSInt.pad(32).asUInt 
+
+val one_bit = true.B
+val fill = Fill(8, one_bit) // 结果是 0xFF (8 个 1 拼接)
 ```
 
 * 切片用于从长字中提取特定位段。
@@ -388,6 +392,8 @@ val issue_inst = PriorityMux(rs_ready, rs_insts)
 
 > 1.  **数据类型一致**：Mux 函数要求所有选项 value 的**原型必须完全一致**。
 > 2.  **`def` 的必要性**：`MuxCase` 和 `MuxLookup` 强制要求一个默认值 `def`，因为在硬件逻辑中必须保证任何情况下信号都有明确的来源。
+
+> 注意：选择性生成电路应当使用 if，而生成含选择器的电路应使用 Mux 系列函数。
 
 ### 2. 优先级与编码工具
 Tomasulo 算法中，你经常需要从一堆“准备好了”的指令中选出一个去执行。这时你需要这些工具：
